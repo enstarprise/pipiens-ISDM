@@ -1,12 +1,5 @@
-# Ignore EVERYTHING by default
 *
-
-# First, whitelist directory structure so Git can traverse
 !*/
-
-# Whitelist ONLY R files (case insensitive)
 !*.R
 !*.r
-
-# Also keep the .gitignore file itself
 !.gitignore
