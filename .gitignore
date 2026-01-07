@@ -1,5 +1,42 @@
+# Ignore everything
 *
+
+# Allow directory structure
 !*/
+
+# Allow source files
 !*.R
 !*.r
+!*.Rmd
+!*.qmd
+
+# Allow documentation
+!*.md
+!README*
+!LICENSE*
+
+# Allow configuration
 !.gitignore
+!.Rprofile
+!renv.lock
+!DESCRIPTION
+!NAMESPACE
+
+# Allow specific data files (if small and necessary)
+# !*.txt
+
+# Ignore large/generated files
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.rds
+*.rda
+*.RData
+*.zip
+*.tar.gz
+*.nc
+*.tif
+*.tiff
+*.qmd
