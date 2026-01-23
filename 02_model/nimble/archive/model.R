@@ -15,6 +15,8 @@
 
 setwd("/users/2601581k/pipiens-ISDM")
 
+rm(list = ls())
+
 cat("Loading libraries...\n")
 
 required_packages <- c(
@@ -50,24 +52,14 @@ suppressPackageStartupMessages({
 # LOAD COVARIATES (z-scored)
 # ============================================================================
 cat("Loading data...\n")
-loaded_data <- load("01_data/loaded_data.RData")
-z_land_data <- load("01_data/env_land_data.RData")
-z_temp <- load("01_data/env_temp_data.RData")
-z_rain_part1 <- load("01_data/env_rain_data_part1.RData")
-z_rain_part2 <- load("01_data/env_rain_data_part2.RData")
-
-load("01_data/loaded_data.RData")
-load("01_data/env_land_data.RData")
-load("01_data/env_temp_data.RData")
-load("01_data/env_rain_data_part1.RData")
-load("01_data/env_rain_data_part2.RData")
-z_rain <- rbind(z_rain_part1, z_rain_part2)
-
-
-remove(z_rain_part1)
-remove(z_rain_part2)
-gc()
-
+loaded_data <- load("01_data/processedCovariates/area2km/loaded_data.RData")
+load("01_data/processedCovariates/area2km/loaded_data.RData")
+z_land_data <- load("01_data/processedCovariates/area2km/env_land_data.RData")
+load("01_data/processedCovariates/area2km/env_land_data.RData")
+z_temp <- load("01_data/processedCovariates/area2km/env_temp_data.RData")
+load("01_data/processedCovariates/area2km/env_temp_data.RData")
+z_rain <- load("01_data/processedCovariates/area2km/env_rain_data.RData")
+load("01_data/processedCovariates/area2km/env_rain_data.RData")
 
 # organise land covariates
 z_land <- as.data.frame(z_land_data) %>%

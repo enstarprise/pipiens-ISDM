@@ -3,39 +3,69 @@
 # ============================================================================
 
 library(tidyverse)
+# Suppress startup messages for cleaner output
+suppressPackageStartupMessages({
+  library(readr)
+  library(writexl)
+  library(readxl)
+  library(tidyverse)
+  library(dplyr)
+  library(tidyr)
+  library(lubridate)
+  library(cmdstanr)
+  library(Matrix)
+  library(sp)
+  library(sf)
+  library(spdep)
+  library(pbapply)
+})
 # ============================================================================
 # 1. LOAD AND ORGANIZE COVARIATES
 # ============================================================================
 cat("Loading data...\n")
-load("01_data/processedCovariates/1km/loaded_data_1km.RData")
-load("01_data/processedCovariates/1km/env_land_data_1km.RData")
-load("01_data/processedCovariates/1km/env_temp_data_1km.RData")
-load("01_data/processedCovariates/1km/env_rain_data_1km_part1.RData")
-load("01_data/processedCovariates/1km/env_rain_data_1km_part2.RData")
+# load("01_data/processedCovariates/1km/loaded_data_1km.RData")
+# load("01_data/processedCovariates/1km/env_land_data_1km.RData")
+# load("01_data/processedCovariates/1km/env_temp_data_1km.RData")
+# load("01_data/processedCovariates/1km/env_rain_data_1km_part1.RData")
+# load("01_data/processedCovariates/1km/env_rain_data_1km_part2.RData")
 
-z_rain <- rbind(z_rain_part1, z_rain_part2)
-remove(z_rain_part1, z_rain_part2)
-gc()
+# z_rain <- rbind(z_rain_part1, z_rain_part2)
+# remove(z_rain_part1, z_rain_part2)
+# gc()
+
+load("~/Library/CloudStorage/OneDrive-UniversityofGlasgow/PhD/AIM 1/pipiens-ISDM/01_data/loaded_data_cov_2point5km.RData")
 
 # Organize land covariates
-z_land <- as.data.frame(z_land_data) %>%
+z_land <- as.data.frame(z_land_data_clean) %>%
   dplyr::arrange(grid_id) %>% # grid_id_area2km
   dplyr::select(starts_with("z_")) %>%
-  dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, z_poi_count, z_reports)) %>% # z_poi_count_grouped
+  dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, z_poi_count, z_reports, z_buildings_count, z_poi_log)) %>% # z_poi_count_grouped
   as.matrix()
 
 z_poi <- as.data.frame(z_land_data) %>%
   dplyr::arrange(grid_id) %>% # grid_id_area2km
-  pull(z_poi_count) # z_poi_count_grouped
+  pull(z_poi_log) # z_poi_count
 
 z_reports <- as.data.frame(z_land_data) %>%
   dplyr::arrange(grid_id) %>% # grid_id_area2km
   pull(z_reports)
 
-cat(sprintf("Full data: %d grids × %d dates\n", nrow(z_temp), ncol(z_temp)))
+cat(sprintf("Full data: %d grids × %d dates\n", nrow(z_temp_clean), ncol(z_temp_clean)))
+
 
 # ============================================================================
-# 2. SUBSET TO OBSERVED GRIDS ONLY (for computational efficiency)
+# COORDS FOR GP APPROX
+# ============================================================================
+
+# grid_coords_km <- coords_2point5km / 1000
+# grid_coords_centered <- scale(grid_coords_km, center = TRUE, scale = FALSE)
+
+# Domain boundaries (for basis function construction)
+# L_x <- diff(range(grid_coords_centered[, 1]))
+# L_y <- diff(range(grid_coords_centered[, 2]))
+
+# ============================================================================
+# SUBSET TO OBSERVED GRIDS ONLY (for computational efficiency)
 # ============================================================================
 cat("\nSubsetting to observed grids only...\n")
 
@@ -56,8 +86,8 @@ cat(sprintf("  Reducing from %d to %d grids (%.1f%% reduction)\n",
 obs_grid_positions <- match(observed_grid_ids, all_grid_ids)
 
 # Subset all covariate matrices/vectors
-z_temp_obs <- z_temp[obs_grid_positions, , drop = FALSE]
-z_rain_obs <- z_rain[obs_grid_positions, , drop = FALSE]
+z_temp_obs <- z_temp_clean[obs_grid_positions, , drop = FALSE]
+z_rain_obs <- z_rain_clean[obs_grid_positions, , drop = FALSE]
 z_land_obs <- z_land[obs_grid_positions, , drop = FALSE]
 z_poi_obs <- z_poi[obs_grid_positions]
 z_reports_obs <- z_reports[obs_grid_positions]
@@ -65,6 +95,63 @@ area_grid_obs <- area_grid[obs_grid_positions]
 
 cat(sprintf("  Climate matrices: %d × %d\n", 
             nrow(z_temp_obs), ncol(z_temp_obs)))
+
+# Convert BNG coordinates to km and center
+stopifnot(!any(is.na(obs_grid_positions)))
+coords_obs <- coords_2point5km[obs_grid_positions, , drop = FALSE]
+
+# Convert BNG meters → km
+grid_coords_obs_km <- coords_obs / 1000
+
+# for test.stan
+# # Center (do NOT scale unless wanting anisotropy distortion)
+# grid_coords_obs_centered <- scale(
+#   grid_coords_obs_km,
+#   center = TRUE,
+#   scale = FALSE
+# )
+# 
+# stopifnot(
+#   nrow(coords_obs) == n_grids_observed,
+#   nrow(z_temp_obs) == n_grids_observed,
+#   length(area_grid_obs) == n_grids_observed
+# )
+# 
+# # Domain boundaries (for basis function construction)
+# L_x <- diff(range(grid_coords_obs_centered[, 1]))
+# L_y <- diff(range(grid_coords_obs_centered[, 2]))
+
+
+# for test2.stan
+# Domain boundaries (for basis function construction)
+L_x <- diff(range(coords_obs[, 1]))
+L_y <- diff(range(coords_obs[, 2]))
+
+print(L_x)
+print(L_y)
+
+
+scale_coords_to_L <- function(coords, L) {
+  # Center coordinates
+  coords_centered <- scale(coords, center = TRUE, scale = FALSE)
+  
+  # Scale to [-L, L] range
+  max_abs <- max(abs(coords_centered))
+  if (max_abs > 0) {
+    coords_scaled <- coords_centered * (L / max_abs)
+  } else {
+    coords_scaled <- coords_centered
+  }
+  return(coords_scaled)
+}
+
+# Use L_x and L_y from your calculation, but you might want to adjust
+# Typically L is about 1.5 times the maximum coordinate value
+L_factor <- 1.5  # Adjust as needed
+
+# Scale coordinates
+grid_coords_scaled <- scale_coords_to_L(grid_coords_obs_km, L_factor * max(L_x, L_y))
+
 
 # ============================================================================
 # 3. HANDLE MISSING VALUES (Stan doesn't accept NAs)
@@ -163,17 +250,16 @@ cat(sprintf("  Presence-only records: %d\n", nrow(cs_presences_stan)))
 # CHOOSING N MAX FOR MARGINALISATION
 # ============================================================================
 
-epsilon <- 1e-8
-phi = 0.2
-lambda = 250
-N_max <- qnbinom(1 - epsilon, size = phi, mu = lambda)
-N_max
-
-(50*74) + 100
-
-
-N_max = ceiling(lambda + 6 * sqrt(lambda + lambda^2 / phi))
-N_max
+# epsilon <- 1e-8
+# phi = 0.2
+# lambda = 250
+# N_max <- qnbinom(1 - epsilon, size = phi, mu = lambda)
+# N_max
+# 
+# (50*74) + 100
+# 
+# N_max = ceiling(lambda + 6 * sqrt(lambda + lambda^2 / phi))
+# N_max
 
 # ============================================================================
 # 5. PREPARE STAN DATA LIST
@@ -214,10 +300,17 @@ stan_data <- list(
   z_RH = z_RH_clean,
   z_WS_rain = z_WS_rain_clean,
   
+  # GP approximation
+  M_sqrt = 20,  # Since M = 49, M_sqrt = 7
+  grid_coords = grid_coords_scaled,
+  L_x = L_factor * L_x,  # Increase boundary slightly
+  L_y = L_factor * L_y,
+  
   # Other
   area_grid = area_grid_obs,
   CONSTANT = 10000,
-  N_multiplier = 50  # sum over N from y to y + 5*max(y) + 100
+  N_multiplier = 5,  # sum over N from y to y + 5*max(y) + 100; was 50
+  grainsize = 10
 )
 
 # Final verification: no NAs in any data
@@ -251,7 +344,7 @@ init_fun <- function() {
     # --------------------
     # Abundance model
     # --------------------
-    beta0      = rnorm(1, 0, 0.2),
+    beta0      = rnorm(1, 2, 0.1),
     beta_temp  = rnorm(1, 0, 0.2),
     beta_rain  = rnorm(1, 0, 0.2),
     beta_land  = rnorm(n_land_covs, 0, 0.2),
@@ -268,14 +361,26 @@ init_fun <- function() {
     # --------------------
     # Thinning model
     # --------------------
-    delta0        = rnorm(1, -1, 0.2),
+    delta0        = rnorm(1, 0, 0.2),
     delta_poi     = rnorm(1, 0, 0.2),
     delta_reports = rnorm(1, 0, 0.2),
     
     # --------------------
     # Dispersion
     # --------------------
-    phi = abs(rnorm(1, 2, 0.5)) + 0.5
+    phi = abs(rnorm(1, 2, 0.5)) + 0.5, # Ensure positive, add small offset
+    
+    # --------------------
+    # GP; HSGP parameters
+    # --------------------
+    # test.stan
+    # sigma_spatial = 0.01,  # Start TINY
+    # rho_spatial = 50,      # km (safe for 2.5 km grid)
+    # beta_gp_raw   = matrix(0, stan_data$M, n_dates)
+    #test2.stan
+    rho_gp = abs(rnorm(1, 30, 5)) + 1.0,    # Add positive offset # Reasonable length-scale (km)
+    alpha_gp = abs(rnorm(1, 0.5, 0.1)) + 0.1, # Add positive offset alpha_gp = 0.5,  # Start small
+    beta_gp_raw = rnorm(stan_data$M_sqrt^2, 0, 0.1)
   )
 }
 
@@ -285,10 +390,21 @@ init_fun <- function() {
 # 6. SAVE PREPARED DATA
 # ============================================================================
 
-saveRDS(stan_data, "01_data/processedCovariates/1km/stan_data_obsgrid_1km.rds")
-saveRDS(observed_grid_ids, "01_data/processedCovariates/1km/observed_grid_ids_1km.rds")
+
+saveRDS(stan_data, "01_data/processedCovariates/2.5km/stan_data_obsgrid_2.5km.rds")
+saveRDS(observed_grid_ids, "01_data/processedCovariates/2.5km/observed_grid_ids_2.5km.rds")
 
 
-save(stan_data, init_fun, observed_grid_ids, n_land_covs, n_dates,
-     file = "01_data/processedCovariates/1km/stan_data_init_obsgrid_1km.RData")
+save(stan_data, init_fun, observed_grid_ids, n_land_covs, n_dates, n_grids_observed, n_grids_obs,
+     file = "01_data/processedCovariates/2.5km/stan_data_init_obsgrid_2.5km.RData")
+
+
+# 
+# 
+# saveRDS(stan_data, "01_data/processedCovariates/1km/stan_data_obsgrid_1km.rds")
+# saveRDS(observed_grid_ids, "01_data/processedCovariates/1km/observed_grid_ids_1km.rds")
+# 
+# 
+# save(stan_data, init_fun, observed_grid_ids, n_land_covs, n_dates,
+#      file = "01_data/processedCovariates/1km/stan_data_init_obsgrid_1km.RData")
 

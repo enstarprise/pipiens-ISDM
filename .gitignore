@@ -40,3 +40,4 @@
 *.tif
 *.tiff
 *.qmd
+.Rproj.user

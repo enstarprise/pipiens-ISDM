@@ -43,7 +43,10 @@ vg <- variogram(lambda ~ 1, data = lambda_df, locations = ~ x + y)
 # --- Fit an exponential variogram model
 vgm_fit <- fit.variogram(
   vg,
-  model = vgm(psill = var(lambda_df$lambda), model = "Exp", range = max(dist(cbind(lambda_df$x, lambda_df$y))) / 3, nugget = 0)
+  model = vgm(psill = var(lambda_df$lambda), 
+              model = "Exp", 
+              range = max(dist(cbind(lambda_df$x, lambda_df$y))) / 3, 
+              nugget = 0)
 )
 vgm_fit
 plot(vg, vgm_fit)
@@ -74,8 +77,12 @@ max_dist <- max(vg$dist)
 
 
 # --- Fit other variogram shapes
-vgm_fit_gauss <- fit.variogram(vg, model = vgm("Gau"))
+vgm_fit_gauss <- fit.variogram(vg, 
+                               model = vgm("Gau"))
+vgm_fit_gauss
+
 vgm_fit_sph   <- fit.variogram(vg, model = vgm("Sph"))
+vgm_fit_sph
 
 plot(vg, vgm_fit_gauss)
 plot(vg, vgm_fit_sph)

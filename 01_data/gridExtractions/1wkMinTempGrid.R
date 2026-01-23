@@ -19,7 +19,7 @@ library(readxl)
 plan(multisession)  # For parallel processing
 
 # --- scotland boundary ---
-scotland <- st_read("gridExtractions/scotlandBoundary/scotland_boundary.shp")
+scotland <- st_read("01_data/gridExtractions/scotlandBoundary/scotland_boundary.shp")
 scotland <- st_transform(scotland,crs = 27700)
 
 # plan(multisession, workers = 10)  # use 10 cores # plan(multisession, workers = availableCores() - 1)
@@ -38,6 +38,7 @@ scotland <- st_transform(scotland,crs = 27700)
 # st_write(grid_clipped_1km, "grids/grid_clipped_1km.gpkg")
 
 grid_clipped <- st_read("grids/grid_clipped_1km.gpkg")
+# grid_clipped <- st_read("01_data/grids/grid_clipped_2point5km.gpkg")
 
 #-----------# 1. create Spatial version of grid---------------
 grid_clipped$ID <- 1:nrow(grid_clipped)
@@ -76,9 +77,9 @@ find_nearest_grid_bng <- function(x, y, x_coords, y_coords) {
   return(c(x_idx, y_idx))
 }
 
-# 3. Modified to calculate 7-day mean min temp
+# 3. Modified to calculate 21-day mean min temp
 get_7d_mean_min_temp <- function(target_date, x_idx, y_idx, nc_data_list) {
-  start_date <- target_date - 20  # 7-day window (inclusive)
+  start_date <- target_date - 20  # 20-day window (inclusive)
   temp_values <- numeric(0)
   
   message("Target range: ", start_date, " to ", target_date)
@@ -103,7 +104,7 @@ get_7d_mean_min_temp <- function(target_date, x_idx, y_idx, nc_data_list) {
   return(mean_temp)
 }
 
-# 4. Modified function to get correct NetCDF files for 7-day window
+# 4. Modified function to get correct NetCDF files for 20-day window
 filter_nc_files_for_temp_range <- function(nc_dir, start_date, end_date) {
   nc_files <- list.files(nc_dir, pattern = "tasmin_hadukgrid_uk_1km_day_.*\\.nc$", full.names = TRUE)
   
@@ -291,7 +292,7 @@ get_unique_extraction_dates <- function(..., date_columns) {
 
 # ---- 1. Setup ----
 # Verify coordinate ranges with temperature files
-nc_first <- nc_open(list.files("gridExtractions/covariates/daily/", 
+nc_first <- nc_open(list.files("01_data/gridExtractions/covariates/daily/", 
                                pattern = "tasmin_hadukgrid_uk_1km_day_.*\\.nc$", 
                                full.names = TRUE)[1])
 x_coords <- ncvar_get(nc_first, "projection_x_coordinate")
@@ -308,7 +309,7 @@ print(paste("NetCDF Y range:", min(y_coords), "-", max(y_coords)))
 # Test 1: Basic file filtering
 test_date <- as.Date("2023-03-015")
 test_files <- filter_nc_files_for_temp_range(
-  "gridExtractions/covariates/daily/", 
+  "01_data/gridExtractions/covariates/daily/", 
   test_date - 20, 
   test_date
 )
@@ -316,8 +317,8 @@ print(test_files)
 
 # Test file loading independently
 test_files <- c(
-  "gridExtractions/covariates/daily/tasmin_hadukgrid_uk_1km_day_20230601-20230630.nc",
-  "gridExtractions/covariates/daily/tasmin_hadukgrid_uk_1km_day_20230701-20230731.nc"
+  "01_data/gridExtractions/covariates/daily/tasmin_hadukgrid_uk_1km_day_20230601-20230630.nc",
+  "01_data/gridExtractions/covariates/daily/tasmin_hadukgrid_uk_1km_day_20230701-20230731.nc"
 )
 
 test_data <- load_nc_temp_data(test_files)
@@ -413,7 +414,7 @@ dates_to_extract[1]
 #   date_columns = c("Collection_date",  "Date_found")
 # )
 
-nc_dir = "gridExtractions/covariates/daily/" 
+nc_dir = "01_data/gridExtractions/covariates/daily/" 
 
 library(pbapply)
 library(parallel)
@@ -474,18 +475,18 @@ cat("Expected:", length(dates_to_extract) * nrow(grid_df), "\n")
 tasmin_grid <- final_result
 
 write.csv(tasmin_grid, 
-          file = "01_data/csvs/tasmin_grid_21day.csv",
+          file = "01_data/csvs/tasmin_grid_21day_2point5km.csv",
           row.names = FALSE)
 
 
 ###### MEAN TEMP #####
-tasmin <- read_csv("csvs/tasmin_grid.csv")
-tasmax <- read_csv("csvs/tasmax_grid.csv")
-
-tasmean <- tasmax[, c("grid_id", "date", "mean_max_temp_7d_celsius")] %>%
-  inner_join(tasmin[, c("grid_id", "date", "mean_min_temp_7d_celsius")], by = c("grid_id", "date")) %>%
-  mutate(mean_temp_7d_celsius = (mean_max_temp_7d_celsius + mean_min_temp_7d_celsius) / 2)
-
-write.csv(tasmean, 
-          file = "csvs/tasmean_grid.csv",
-          row.names = FALSE)
+# tasmin <- read_csv("csvs/tasmin_grid_2point5km.csv")
+# tasmax <- read_csv("csvs/tasmax_grid.csv")
+# 
+# tasmean <- tasmax[, c("grid_id", "date", "mean_max_temp_7d_celsius")] %>%
+#   inner_join(tasmin[, c("grid_id", "date", "mean_min_temp_7d_celsius")], by = c("grid_id", "date")) %>%
+#   mutate(mean_temp_7d_celsius = (mean_max_temp_7d_celsius + mean_min_temp_7d_celsius) / 2)
+# 
+# write.csv(tasmean, 
+#           file = "csvs/tasmean_grid.csv",
+#           row.names = FALSE)

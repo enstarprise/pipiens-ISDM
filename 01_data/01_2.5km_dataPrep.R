@@ -270,9 +270,10 @@ data_dir <- "."
 input_files <- list(
   survey = file.path(data_dir, "01_data/csvs/survey_df.csv"),
   cs = file.path(data_dir, "01_data/csvs/cs_df.csv"),
-  grid = file.path(data_dir, "01_data/csvs/grid_clipped_wkt.csv"),
-  z_land = file.path(data_dir, "01_data/covariates/z_land.csv"),
-  z_climate = file.path(data_dir, "01_data/covariates/z_climate.csv")
+  grid = file.path(data_dir, "01_data/csvs/grid_clipped_2point5km_wkt.csv"),
+  z_land = file.path(data_dir, "01_data/covariates/z_land_2point5km.csv"),
+  z_climate = file.path(data_dir, "01_data/covariates/z_climate_2point5km.csv"),
+  dist_matrix = file.path(data_dir), "01_data/covariates/dist_matrix_2point5km_meters.Rdata"
 )
 
 # Check that all files exist
@@ -363,6 +364,7 @@ cat(sprintf("Grid data loaded: %d grid cells\n", nrow(grid)))
 cat(sprintf("Total area: %.1f km²\n", sum(grid$area)))
 
 print_df_summary(grid, "Grid Data")
+
 
 # ============================================================================
 # ADD GRID ID COLUMN TO THE DATAFRAMES
@@ -540,7 +542,7 @@ data_summary <- data.frame(
 print(data_summary, row.names = FALSE)
 
 # ==============================================================================
-# 1. GRID AND DATA LOADING
+# 1. GRID, DIST MATRIX, AND DATA LOADING
 # ==============================================================================
 cat("Loading grid and climate data...\n")
 
@@ -552,6 +554,9 @@ dates_to_keep <- union(unique(survey_df$date), unique(cs_df$date))
 dates_to_keep <- as.Date(dates_to_keep)
 all_dates_sorted <- sort(unique(dates_to_keep))
 date_lookup <- setNames(seq_along(all_dates_sorted), as.character(all_dates_sorted))
+
+# dist_matrix <- load("01_data/covariates/dist_matrix_2point5km_meters.Rdata")
+
 
 cat("Data types fixed:\n")
 cat("  grid grid_id:", class(grid$grid_id), "\n")
@@ -617,6 +622,31 @@ cs_presences <- cs_df %>%
 # Bernoulli ones trick: observe 1 at each presence location
 cs_presences$ones <- 1
 
+# ============================================================================
+# LOAD CENTROIDS AND COORDS (sf format)
+# ============================================================================
+
+grid_2point5km <- st_read("01_data/grids/grid_clipped_2point5km.gpkg")
+
+
+grid_2point5km_ordered <- grid_2point5km %>%
+  mutate(grid_id = as.character(grid_id)) %>%
+  slice(match(grid_levels, grid_id))
+
+stopifnot(all(grid_2point5km_ordered$grid_id == grid_levels))
+
+grid_2point5km$area <- as.numeric(st_area(grid_2point5km)) / 1e6  # km²
+grid_2point5km$centroid <- st_centroid(grid_2point5km$geom)
+
+centroids_2point5km <- st_centroid(grid_2point5km_ordered)
+coords_2point5km <- st_coordinates(centroids_2point5km)
+
+# Observed grids must map correctly
+stopifnot(all(!is.na(obs_grid_idx)))
+stopifnot(all(!is.na(po_grid_idx)))
+
+
+
 # ==============================================================================
 # 4. PREPARING FINAL COVARIATE MATRICES 
 # ==============================================================================
@@ -670,11 +700,16 @@ hist(z_rain2, breaks = 40, main = "z_rain^2", xlab = "")
 z_land_data <- z_land_data %>%
   arrange(grid_id) %>%
   # dplyr::select(starts_with("z_")) %>%
-  # dplyr::select(-c(z_urban_km2, z_suburban_km2, z_poi_count_grouped, z_reports)) %>%
+  # dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, z_poi_count_grouped, z_reports)) %>%
   as.matrix()
 
+z_land_data_clean <- z_land_data
+z_land_data_clean[is.na(z_land_data_clean )] <- 0
+
 n_land_covs <- ncol(z_land_data[, setdiff(grep("^z_", colnames(z_land_data), value = TRUE), 
-                                          c("z_saltwater_km2", "z_urban_km2", "z_suburban_km2", "z_poi_count_grouped", "z_reports"))])
+                                          c("z_saltwater_km2", "z_urban_km2", "z_suburban_km2", 
+                                            "z_poi_count", "z_buildings_count", "z_poi_log",
+                                             "z_reports"))])
 
 
 # ==============================================================================
@@ -688,10 +723,11 @@ save(
   obs_grid_idx, site_to_grid,
   
   area_grid,# area_grid_mat,
+  centroids_2point5km, coords_2point5km,
   
   dates_to_keep, grid_levels,
   date_lookup, grid_id_lookup,
-  file = "01_data/loaded_data.RData"
+  file = "01_data/loaded_data_2point5km.RData"
 )
 
 save(
@@ -700,68 +736,73 @@ save(
   obs_grid_idx, site_to_grid,
   
   z_temp_clean, z_rain_clean, z_rain2,
-  z_land_data, z_climate_data,
+  z_land_data, z_land_data_clean, z_climate_data,
+  
+  centroids_2point5km, coords_2point5km,
   
   area_grid,# area_grid_mat,
   
   dates_to_keep, grid_levels,
   date_lookup, grid_id_lookup,
   
-  file = "01_data/loaded_data_cov.RData"
+  file = "01_data/loaded_data_cov_2point5km.RData"
 )
 
-save(
-  z_land_data,
-  file = "01_data/env_land_data.RData"
-)
-
-save(
-  z_climate_data, 
-  file = "01_data/env_climate_data.RData"
-)
+# save(
+#   z_land_data,
+#   file = "01_data/env_land_data.RData"
+# )
+# 
+# save(
+#   z_climate_data, 
+#   file = "01_data/env_climate_data.RData"
+# )
 
 # ============================= TEMP SAVE ==================================
-save(
-  z_temp_clean, 
-  file = "01_data/env_temp_data.RData"
-)
-saveRDS(z_temp_clean, "01_data/env_temp_data.rds")
-# Save with maximum compression
-saveRDS(z_temp_clean, "01_data/env_temp_data.rds", compress = "xz")
-save(z_temp_clean, file = "01_data/env_temp_data.RData", compress = "xz")
+# save(
+#   z_temp_clean, 
+#   file = "01_data/env_temp_data.RData"
+# )
+# saveRDS(z_temp_clean, "01_data/env_temp_data.rds")
+# # Save with maximum compression
+# saveRDS(z_temp_clean, "01_data/env_temp_data.rds", compress = "xz")
+# save(z_temp_clean, file = "01_data/env_temp_data.RData", compress = "xz")
 # ==========================================================================
 
 # ============================= RAIN SAVE ==================================
-save(
-  z_rain_clean, 
-  file = "01_data/env_rain_data.RData"
-)
-saveRDS(z_rain_clean, "01_data/env_rain_data.rds")
+# save(
+#   z_rain_clean, 
+#   file = "01_data/env_rain_data.RData"
+# )
+# saveRDS(z_rain_clean, "01_data/env_rain_data.rds")
+# 
+# save(
+#   z_rain2, 
+#   file = "01_data/env_rain2_data.RData"
+# )
+# saveRDS(z_rain2, "01_data/env_rain2_data.rds")
+# 
+# 
+# # Split by rows (time periods or spatial points)
+# mid_point <- floor(nrow(z_rain_clean) / 2)
+# 
+# z_rain_part1 <- z_rain_clean[1:mid_point, ]
+# z_rain_part2 <- z_rain_clean[(mid_point + 1):nrow(z_rain), ]
+# 
+# save(z_rain_part1, file = "01_data/env_rain_data_part1.RData", compress = "xz")
+# save(z_rain_part2, file = "01_data/env_rain_data_part2.RData", compress = "xz")
+# saveRDS(z_rain_part1, "01_data/env_rain_data_part1.rds", compress = "xz")
+# saveRDS(z_rain_part2, "01_data/env_rain_data_part2.rds", compress = "xz")
 
-save(
-  z_rain2, 
-  file = "01_data/env_rain2_data.RData"
-)
-saveRDS(z_rain2, "01_data/env_rain2_data.rds")
-
-
-# Split by rows (time periods or spatial points)
-mid_point <- floor(nrow(z_rain_clean) / 2)
-
-z_rain_part1 <- z_rain_clean[1:mid_point, ]
-z_rain_part2 <- z_rain_clean[(mid_point + 1):nrow(z_rain), ]
-
-save(z_rain_part1, file = "01_data/env_rain_data_part1.RData", compress = "xz")
-save(z_rain_part2, file = "01_data/env_rain_data_part2.RData", compress = "xz")
-saveRDS(z_rain_part1, "01_data/env_rain_data_part1.rds", compress = "xz")
-saveRDS(z_rain_part2, "01_data/env_rain_data_part2.rds", compress = "xz")
-# ==========================================================================
 
 # On cluster, load and recombine:
 # z_rain_part1 <- readRDS("env_rain_data_part1.rds")
 # z_rain_part2 <- readRDS("env_rain_data_part2.rds")
 # z_rain <- rbind(z_rain_part1, z_rain_part2)
 # Or for .RData format
+
+# ==========================================================================
+
 
 
 cat("✓ All data loaded and saved to 'loaded_data.RData'\n")

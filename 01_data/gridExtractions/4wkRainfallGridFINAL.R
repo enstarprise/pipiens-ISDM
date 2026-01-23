@@ -14,7 +14,7 @@ scotland <- st_transform(scotland,crs = 27700)
 # grid_1km <- st_read("grids/grid_1km.gpkg")
 # grid_clipped <- st_read("grids/grid_clipped.gpkg")
 grid_clipped <- st_read("grids/grid_clipped_1km.gpkg")
-
+grid_clipped <- st_read("01_data/grids/grid_clipped_2point5km.gpkg")
 
 # grid centers from sf
 grid_coords <- st_centroid(grid_clipped) |> st_coordinates()
@@ -24,7 +24,7 @@ grid_df <- data.frame(
   y_bng = grid_coords[,2]
 )
 
-nc_files <- list.files("gridExtractions/covariates/daily/",
+nc_files <- list.files("01_data/gridExtractions/covariates/daily/",
                        pattern = "rainfall.*\\.nc$", full.names = TRUE)
 
 nc_first <- nc_open(nc_files[1])
@@ -221,7 +221,7 @@ plan(multisession, workers = 8)
 
 
 # Verify coordinate ranges
-nc_first <- nc_open(list.files("gridExtractions/covariates/daily/", 
+nc_first <- nc_open(list.files("01_data/gridExtractions/covariates/daily/", 
                                pattern = "rainfall.*\\.nc$", 
                                full.names = TRUE)[1])
 x_coords <- ncvar_get(nc_first, "projection_x_coordinate")
@@ -237,7 +237,7 @@ print(paste("NetCDF Y range:", min(y_coords), "-", max(y_coords)))
 # Test 1: Basic file filtering
 test_date <- as.Date("2023-07-01")
 test_files <- filter_nc_files_for_date_range(
-  "gridExtractions/covariates/daily/", 
+  "01_data/gridExtractions/covariates/daily/", 
   test_date - 27, 
   test_date
 )
@@ -245,8 +245,8 @@ print(test_files)
 
 # Test file loading independently
 test_files <- c(
-  "gridExtractions/covariates/daily/rainfall_hadukgrid_uk_1km_day_20230601-20230630.nc",
-  "gridExtractions/covariates/daily/rainfall_hadukgrid_uk_1km_day_20230701-20230731.nc"
+  "01_data/gridExtractions/covariates/daily/rainfall_hadukgrid_uk_1km_day_20230601-20230630.nc",
+  "01_data/gridExtractions/covariates/daily/rainfall_hadukgrid_uk_1km_day_20230701-20230731.nc"
 )
 
 test_data <- load_nc_data(test_files)
@@ -289,7 +289,7 @@ test_dates <- as.Date(c("2023-06-15", "2023-07-15"))
 test_results <- extract_grid_rainfall_ts_optimized(
   grid_df[1:5,], 
   test_dates, 
-  "gridExtractions/covariates/daily/"
+  "01_data/gridExtractions/covariates/daily/"
 )
 print(test_results)
 
@@ -352,7 +352,7 @@ library(progressr)
 with_progress({
   rainfall_grid_ts <- extract_grid_rainfall_ts_optimized(grid_df, 
                                                          dates_to_extract,
-                                                         "gridExtractions/covariates/daily/")
+                                                         "01_data/gridExtractions/covariates/daily/")
 })
 head(rainfall_grid_ts$rainfall_data)
 rainfall_grid_ts$rainfall_data <- rainfall_grid_ts$rainfall_data %>%
@@ -417,7 +417,7 @@ ggplot() +
 
 # ----- 8. save it -----
 write.csv(rainfall_grid, 
-          file = "01_data/csvs/rainfall_grid_new.csv",
+          file = "01_data/csvs/rainfall_grid_new_2point5km.csv",
           row.names = FALSE)
 
 
