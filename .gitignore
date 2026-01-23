@@ -9,6 +9,7 @@
 !*.r
 !*.Rmd
 !*.qmd
+!*.stan
 
 # Allow documentation
 !*.md
