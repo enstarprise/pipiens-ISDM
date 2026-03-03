@@ -24,7 +24,7 @@ suppressPackageStartupMessages({
 })
 
 # stan_data_GIRDRES_MODELTYPE_GRIDSCOPE_QUADRATIC.RData
-load("01_data/processedCovariates/2.5km/stan_data_2.5km_nonspatial_observed_none.RData")
+load("01_data/processedCovariates/2.5km/stan_data_2.5km_NNGP_all_both.RData")
 
 # ============================================================================
 #  MODEL RUN 
@@ -39,7 +39,7 @@ print(test_init$beta_land)
 print("Should be around ±0.03")
 
 
-model <- cmdstan_model("02_model/stan/model_nonspatial_poisson.stan",
+model <- cmdstan_model("02_model/stan/model_nngp.stan",
                        cpp_options = list(stan_threads = TRUE))
 
 

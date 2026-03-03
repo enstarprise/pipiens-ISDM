@@ -32,9 +32,9 @@
 
 # ============================================================================
 
-MODEL_TYPE <- "nonspatial"   # "HSGP" | "NNGP" | "NNGP_centered" | "nonspatial"
-GRID_SCOPE <- "observed"        # "all"  | "observed"
-QUADRATIC  <- "none"            # "none" | "rain" | "both"
+MODEL_TYPE <- "NNGP"   # "HSGP" | "NNGP" | "NNGP_centered" | "nonspatial"
+GRID_SCOPE <- "all"        # "all"  | "observed"
+QUADRATIC  <- "both"            # "none" | "rain" | "both"
 
 stopifnot(MODEL_TYPE %in% c("HSGP", "NNGP", "NNGP_centered", "nonspatial"))
 stopifnot(GRID_SCOPE %in% c("all", "observed"))
@@ -285,7 +285,7 @@ if (MODEL_TYPE %in% c("NNGP", "NNGP_centered")) {
   library(spNNGP)
   source("02_model/stan/NNMatrix.R")
   
-  M_nngp <- 10
+  M_nngp <- 8
   
   cat(sprintf("  N = %d grids | M = %d neighbours\n", nrow(coords_scope), M_nngp))
   

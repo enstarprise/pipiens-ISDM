@@ -154,7 +154,9 @@ data {
 
   // --- covariates ---
   matrix[n_grids_total, n_dates]     z_temp;
+  matrix[n_grids_total, n_dates]     z_temp_sq;
   matrix[n_grids_total, n_dates]     z_rain;
+  matrix[n_grids_total, n_dates]     z_rain_sq;
   matrix[n_grids_total, n_land_covs] z_land;
   vector[n_grids_total]              z_poi;
   vector[n_grids_total]              z_reports;
@@ -192,6 +194,8 @@ parameters {
   real beta0;
   real beta_temp;
   real beta_rain;
+  real beta_temp2;  // quadratic temperature; samples from prior when z_temp_sq = 0
+  real beta_rain2;  // quadratic rainfall;    samples from prior when z_rain_sq = 0
   vector[n_land_covs] beta_land;
 
   // --- Detection model  ---
@@ -237,8 +241,10 @@ transformed parameters {
 
     for (t in 1:n_dates) {
       real log_lambda_base = beta0 +
-                             beta_temp * z_temp[g, t] +
-                             beta_rain * z_rain[g, t] +
+                             beta_temp  * z_temp[g, t] +
+                             beta_temp2 * z_temp_sq[g, t] +
+                             beta_rain  * z_rain[g, t] +
+                             beta_rain2 * z_rain_sq[g, t] +
                              dot_product(beta_land, z_land[g, ]) +
                              spatial_effect[g];  
 
@@ -256,9 +262,10 @@ transformed parameters {
 model {
   // --- priors ---
   beta0     ~ normal(0, 2);
-  beta_temp ~ normal(0, 1);
-  beta_rain ~ normal(0, 1);
-  beta_land ~ normal(0, 0.2);
+  beta_temp  ~ normal(0, 1);
+  beta_rain  ~ normal(0, 1);
+  beta_temp2 ~ normal(0, 1);  // inactive when z_temp_sq = 0: samples prior only
+  beta_rain2 ~ normal(0, 1);  // inactive when z_rain_sq = 0: samples prior only
 
   alpha0        ~ normal(logit(0.10), 0.5);
   alpha_RH      ~ normal(0, 1);
