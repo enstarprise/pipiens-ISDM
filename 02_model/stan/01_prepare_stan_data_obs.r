@@ -39,7 +39,9 @@ load("~/Library/CloudStorage/OneDrive-UniversityofGlasgow/PhD/AIM 1/pipiens-ISDM
 z_land <- as.data.frame(z_land_data_clean) %>%
   dplyr::arrange(grid_id) %>% # grid_id_area2km
   dplyr::select(starts_with("z_")) %>%
-  dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, z_poi_count, z_reports, z_buildings_count, z_poi_log)) %>% # z_poi_count_grouped
+  dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, 
+                   z_poi_count, z_reports, z_buildings_count, 
+                   z_poi_log, z_livestock_density, z_freshwater_km2_log)) %>% # z_poi_count_grouped
   as.matrix()
 
 z_poi <- as.data.frame(z_land_data) %>%
@@ -100,57 +102,59 @@ cat(sprintf("  Climate matrices: %d × %d\n",
 stopifnot(!any(is.na(obs_grid_positions)))
 coords_obs <- coords_2point5km[obs_grid_positions, , drop = FALSE]
 
-# Convert BNG meters → km
-grid_coords_obs_km <- coords_obs / 1000
+#=============================================================================
+# HSGP DATA PREPARATION - CORRECT IMPLEMENTATION
+#=============================================================================
 
-# for test.stan
-# # Center (do NOT scale unless wanting anisotropy distortion)
-# grid_coords_obs_centered <- scale(
-#   grid_coords_obs_km,
-#   center = TRUE,
-#   scale = FALSE
-# )
-# 
-# stopifnot(
-#   nrow(coords_obs) == n_grids_observed,
-#   nrow(z_temp_obs) == n_grids_observed,
-#   length(area_grid_obs) == n_grids_observed
-# )
-# 
-# # Domain boundaries (for basis function construction)
-# L_x <- diff(range(grid_coords_obs_centered[, 1]))
-# L_y <- diff(range(grid_coords_obs_centered[, 2]))
+# 1. Convert to kilometers
+grid_coords_km <- coords_obs / 1000
 
+# 2. Center coordinates (this is what the paper requires!)
+grid_coords_centered <- scale(grid_coords_km, center = TRUE, scale = FALSE)
 
-# for test2.stan
-# Domain boundaries (for basis function construction)
-L_x <- diff(range(coords_obs[, 1]))
-L_y <- diff(range(coords_obs[, 2]))
+# 3. Compute half-ranges
+S_x <- max(abs(grid_coords_centered[, 1]))
+S_y <- max(abs(grid_coords_centered[, 2]))
 
-print(L_x)
-print(L_y)
+# 4. Set boundary factor
+c <- 1.5  # Paper recommends 1.2-1.5
 
+# 5. Compute boundaries
+L_x <- c * S_x
+L_y <- c * S_y
 
-scale_coords_to_L <- function(coords, L) {
-  # Center coordinates
-  coords_centered <- scale(coords, center = TRUE, scale = FALSE)
-  
-  # Scale to [-L, L] range
-  max_abs <- max(abs(coords_centered))
-  if (max_abs > 0) {
-    coords_scaled <- coords_centered * (L / max_abs)
-  } else {
-    coords_scaled <- coords_centered
-  }
-  return(coords_scaled)
+# 6. Choose number of basis functions
+# Rule of thumb: M_sqrt should scale with (c * S) / rho 
+# posterior rho is around 7: 1.5*837/7 = ~180
+# With large domain and small rho, need more basis functions
+M_sqrt <- 20  # Conservative choice (400 total basis functions)
+
+# 7. Diagnostic output
+cat("HSGP Configuration:\n")
+cat("==================\n")
+cat("Domain extent:\n")
+cat("  X range:", range(grid_coords_centered[,1]), "km\n")
+cat("  Y range:", range(grid_coords_centered[,2]), "km\n")
+cat("\nHalf-ranges (S):\n")
+cat("  S_x =", round(S_x, 2), "km\n")
+cat("  S_y =", round(S_y, 2), "km\n")
+cat("\nBoundary factor: c =", c, "\n")
+cat("\nBoundaries (L = c × S):\n")
+cat("  L_x =", round(L_x, 2), "km\n")
+cat("  L_y =", round(L_y, 2), "km\n")
+cat("\nBasis functions:\n")
+cat("  M_sqrt =", M_sqrt, "\n")
+cat("  Total M =", M_sqrt^2, "\n")
+cat("\nExpected lengthscale range:\n")
+cat("  Suggested: ρ > c*S/M_sqrt ≈", round(c*mean(c(S_x,S_y))/M_sqrt, 2), "km\n")
+
+# 8. Verify coverage
+if (!all(abs(grid_coords_centered[, 1]) <= L_x) || 
+    !all(abs(grid_coords_centered[, 2]) <= L_y)) {
+  stop("ERROR: Some coordinates fall outside [-L, L] domain!")
+} else {
+  cat("\n✓ All coordinates within domain boundaries\n")
 }
-
-# Use L_x and L_y from your calculation, but you might want to adjust
-# Typically L is about 1.5 times the maximum coordinate value
-L_factor <- 1.5  # Adjust as needed
-
-# Scale coordinates
-grid_coords_scaled <- scale_coords_to_L(grid_coords_obs_km, L_factor * max(L_x, L_y))
 
 
 # ============================================================================
@@ -302,7 +306,7 @@ stan_data <- list(
   
   # GP approximation
   M_sqrt = 20,  # Since M = 49, M_sqrt = 7
-  grid_coords = grid_coords_scaled,
+  grid_coords = grid_coords_centered,
   L_x = L_factor * L_x,  # Increase boundary slightly
   L_y = L_factor * L_y,
   
@@ -368,7 +372,8 @@ init_fun <- function() {
     # --------------------
     # Dispersion
     # --------------------
-    phi = abs(rnorm(1, 2, 0.5)) + 0.5, # Ensure positive, add small offset
+    #phi = abs(rnorm(1, 2, 0.5)) + 0.5, # Ensure positive, add small offset
+    phi = 1,
     
     # --------------------
     # GP; HSGP parameters
@@ -378,8 +383,10 @@ init_fun <- function() {
     # rho_spatial = 50,      # km (safe for 2.5 km grid)
     # beta_gp_raw   = matrix(0, stan_data$M, n_dates)
     #test2.stan
-    rho_gp = abs(rnorm(1, 30, 5)) + 1.0,    # Add positive offset # Reasonable length-scale (km)
-    alpha_gp = abs(rnorm(1, 0.5, 0.1)) + 0.1, # Add positive offset alpha_gp = 0.5,  # Start small
+    # rho_gp = abs(rnorm(1, 30, 5)) + 1.0,    # Add positive offset # Reasonable length-scale (km)
+    # alpha_gp = abs(rnorm(1, 0.5, 0.1)) + 0.1, # Add positive offset alpha_gp = 0.5,  # Start smal
+    alpha_gp = 0.5,
+    rho_gp = 5,
     beta_gp_raw = rnorm(stan_data$M_sqrt^2, 0, 0.1)
   )
 }
@@ -390,7 +397,6 @@ init_fun <- function() {
 # 6. SAVE PREPARED DATA
 # ============================================================================
 
-
 saveRDS(stan_data, "01_data/processedCovariates/2.5km/stan_data_obsgrid_2.5km.rds")
 saveRDS(observed_grid_ids, "01_data/processedCovariates/2.5km/observed_grid_ids_2.5km.rds")
 
@@ -399,12 +405,9 @@ save(stan_data, init_fun, observed_grid_ids, n_land_covs, n_dates, n_grids_obser
      file = "01_data/processedCovariates/2.5km/stan_data_init_obsgrid_2.5km.RData")
 
 
-# 
-# 
 # saveRDS(stan_data, "01_data/processedCovariates/1km/stan_data_obsgrid_1km.rds")
 # saveRDS(observed_grid_ids, "01_data/processedCovariates/1km/observed_grid_ids_1km.rds")
-# 
-# 
+
 # save(stan_data, init_fun, observed_grid_ids, n_land_covs, n_dates,
 #      file = "01_data/processedCovariates/1km/stan_data_init_obsgrid_1km.RData")
 

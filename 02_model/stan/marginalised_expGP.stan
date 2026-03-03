@@ -33,10 +33,10 @@
 //
 // 2. Basis frequencies (lambda --> w):
 //    Each basis function has an associated frequency that determines how wiggly
-//    it is. Lower frequencies = smooth, large-scale variation;
-//    higher frequencies = fine-scale variation.
+//    it is. Lower frequencies correspond to smooth, large-scale variation;
+//    higher frequencies correspond to fine-scale variation.
 //
-// 3. Spectral density (spd / spd_2D):
+// 3. Spectral density (spd / spd_exp_2D): USING THE EXP KERNEL
 //    The GP kernel is expressed in the frequency domain to determine how much
 //    variance each basis function is allowed to have. This encodes the GP
 //    smoothness assumptions (controlled by alpha_gp and rho_gp).
@@ -125,11 +125,10 @@ functions {
   // weight should a sine wave of frequency *w* get"
       // w is the actual freq of the sine wave labelled by 'm'
       // lambda is the squared frequecy 
-  real spd(real alpha, real rho, real w) {
-        // Matérn ν=3/2 spectral density in 1D
-        // S(w) = alpha^2 * 4 * sqrt(3) * rho / (1 + (rho^2 * w^2) / 3)^2
-    return alpha^2 * 4 * sqrt(3) * rho / square(1 + (rho^2 * w^2) / 3);
-    }
+      real spd_exp(real alpha, real rho, real w) {
+        return 2 * alpha^2 * rho / (1 + (rho^2) * (w^2));
+        }
+
   
   // 2. BUILD THE BASIS FUNCTIONS 
   
@@ -155,11 +154,12 @@ functions {
   // the GP kernel (alpha, rho) determines how much variance/wiggly the BFs are
   // allowed to have; this encodes the GP smoothness assumptions controlled by
   // alpha and rho
-  real spd_2D(real alpha, real rho, real w1, real w2) {
-    real kappa = sqrt(3) / rho;
+  real spd_exp_2D(real alpha, real rho, real w1, real w2) {
     real w2_sum = w1^2 + w2^2;
-    return alpha^2 * 4 * kappa^3 / square(kappa^2 + w2_sum);
-  }
+    return 2 * alpha^2 * rho^2 /
+    pow(1 + rho^2 * w2_sum, 1.5);
+    }
+
   
  // 3. CONVERT GP KERNEL INTO BASIS WEIGHTS
  
@@ -181,7 +181,7 @@ functions {
         int idx = (m1 - 1) * M_sqrt + m2;
         real w1 = sqrt(lambda(L_x, m1));
         real w2 = sqrt(lambda(L_y, m2));
-        spd_sqrt[idx] = sqrt(spd_2D(alpha_gp, rho_gp, w1, w2));
+        spd_sqrt[idx] = sqrt(spd_exp_2D(alpha_gp, rho_gp, w1, w2));
       }
     }
     return spd_sqrt;
@@ -273,8 +273,7 @@ parameters {
   real alpha0;
   real alpha_RH;
   real alpha_WS_rain;
-  vector[4] alpha_trap_raw; // four parameters that are free to vary, and the 
-  // fifth trap depends on the sum of the other 4 (a5 = -sum(a1...a4))
+  vector[4] alpha_trap_raw;
   real log_sigma_trap;
   
   // Thinning model
@@ -477,39 +476,5 @@ generated quantities {
       if (y_rep[k] == 0) zeros += 1;
     }
   }
-  
-  // =========================================================================
-  // LOG-LIKELIHOOD FOR LOO-CV
-  // =========================================================================
-  
-  // Survey observations
-  vector[n_obs_y] log_lik_survey;
-  
-  for (k in 1:n_obs_y) {
-    int g = site_to_grid[k];
-    int t = date_y[k];
-    real lambda = lambda_base[g, t];
-    real p_trap = inv_logit(alpha0 + 
-                            alpha_RH * z_RH[k] + 
-                            alpha_WS_rain * z_WS_rain[k] + 
-                            alpha_trap[trap_type[k]]);
-    
-    // Marginalized log-likelihood
-    log_lik_survey[k] = binomial_negbin_marginal_lpmf(
-      y[k] | p_trap, lambda, phi, N_max
-    );
-  }
-  
-  // Presence-only observations
-  vector[n_obs_po] log_lik_po;
-  
-  for (r in 1:n_obs_po) {
-    int g = po_grid_idx[r];
-    int t = date_po[r];
-    log_lik_po[r] = log(lambda_thinned[g, t]) - 
-                    log(background[t]) - 
-                    log(CONSTANT);
-  }
 }
-
 

@@ -14,9 +14,6 @@ library(exactextractr)
 library(tidyr)
 library(future.apply)
 library(ggplot2)
-library(nimble)
-install.packages("spNNGP")
-library(nimble)
 
 
 #####  read csvs and distance matrix 
@@ -30,7 +27,6 @@ landcover_grouped <- read_csv("01_data/covariates/landcover_grouped_2point5km.cs
 buildings_df <- read_csv("01_data/covariates/buildings_2point5km.csv")
 poi_df <- read_csv("01_data/covariates/poi_grouped_2point5km.csv")
 reports_df <- read_csv("01_data/covariates/cs_reports_2point5km.csv")
-
 
 
 # --- LOAD BASE GRIDS ---------------------------------------------------------
@@ -66,67 +62,6 @@ max(dist_matrix_2point5km_meters)
 # Convert to matrix and km if needed
 # dist_matrix_2point5km_km <- as.matrix(dist_matrix_2point5km_meters) / 1000  # to km
 # save(dist_matrix_2point5km_km, file = "dist_matrix_2point5km_km.Rdata")
-
-
-## CREATE NNGP VARIABLES
-# extract coordinates as numeric matrix
-# this determines the scale of rho
-coords_2point5km <- st_coordinates(centroids_2point5km)
-dim(coords_2point5km) # should be 14642 x 2 units are meters; 
-
-library(spNNGP)
-
-dummy_data <- data.frame(
-  y = rnorm(nrow(coords_2point5km))
-)
-
-
-priors <- list(
-  beta.Normal = list(mean = 0, var = 1e6),
-  sigma.sq.IG = list(a = 2, b = 1),
-  tau.sq.IG   = list(a = 2, b = 1),
-  phi.Unif    = c(0.001, 100000)   # <--- vector, not list
-)
-
-starting <- list(
-  beta = 0,
-  sigma.sq = 1,
-  tau.sq = 1,
-  phi = 10000
-)
-
-tuning <- list(
-  phi = 1,
-  sigma.sq = 1,
-  tau.sq = 1
-)
-
-m <- 15
-
-dummy_fit <- spNNGP(
-  y ~ 1,
-  data = dummy_data,
-  coords = coords_2point5km,
-  family = "gaussian",
-  cov.model = "exponential",
-  n.neighbors = m,
-  n.samples = 1,           
-  n.report = 1,
-  verbose = FALSE,
-  priors = priors,
-  starting = starting,
-  tuning = tuning,
-  return.neighbor.info = TRUE
-)
-
-
-neighbor_info <- dummy_fit$neighbor.info
-
-str(neighbor_info)
-# You should see nnIndx, nnDist, nnIndxLU
-
-
-
 
 
 ## PREPARE GRID 2KM (CLIPPED) AS A WKT CSV FILE FOR USE IN THE CLUSTER
@@ -257,9 +192,9 @@ livestock_df <- grid_2point5km %>%
   dplyr::select(grid_id, livestock_density) %>%
   mutate(
     livestock_density = as.numeric(livestock_density),
+    livestock_log = log1p(livestock_density),   # log(1 + x)
     z_livestock = scale(livestock_density)[,1]
   )
-
 
 write_csv(livestock_df, "01_data/covariates/livestockDensity_2point5km_new.csv")
 
@@ -440,6 +375,11 @@ landcover_grouped <- landcover_areas %>%
                 grassland_heather_km2, urban_km2, suburban_km2, arable_km2)
 
 
+### log transform wetland
+# landcover_grouped <- landcover_grouped %>%
+#   mutate(freshwater_km2_log = log1p(freshwater_km2))   # log(1 + x))
+
+
 write_csv(landcover_grouped, "01_data/covariates/landcover_grouped_2point5km.csv")
 
 
@@ -567,11 +507,12 @@ build_covariates <- function(
   
   static_df <- landcover_grouped %>%
     left_join(livestock_df %>% dplyr::select(grid_id, livestock_density), by = "grid_id") %>%
+    left_join(livestock_df %>% dplyr::select(grid_id, livestock_log), by = "grid_id") %>% ## z score the log column
     left_join(elevation_df %>% dplyr::select(grid_id, elevation), by = "grid_id") %>%
     left_join(buildings_df %>% dplyr::select(grid_id, buildings_count), by = "grid_id") %>%
     left_join(poi_df %>% dplyr::select(grid_id, poi_count), by = "grid_id") %>%
-    left_join(buildings_df %>% dplyr::select(grid_id, buildings_log), by = "grid_id") %>%
-    left_join(poi_df %>% dplyr::select(grid_id, poi_log), by = "grid_id") %>%
+    left_join(buildings_df %>% dplyr::select(grid_id, buildings_log), by = "grid_id") %>% ## z score the log column
+    left_join(poi_df %>% dplyr::select(grid_id, poi_log), by = "grid_id") %>% ## z score the log column
     left_join(reports_df %>% dplyr::select(grid_id, reports), by = "grid_id") %>%
     arrange(grid_id)
   
@@ -584,6 +525,8 @@ build_covariates <- function(
         .names = "z_{.col}"
       )
     )
+  
+  # also z-score the wetland column?
   
   write_csv(z_land_df, land_out)
   message(paste("Wrote:", land_out))

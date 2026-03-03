@@ -23,7 +23,9 @@ load("~/Library/CloudStorage/OneDrive-UniversityofGlasgow/PhD/AIM 1/pipiens-ISDM
 z_land <- as.data.frame(z_land_data_clean) %>%
   dplyr::arrange(grid_id) %>% # grid_id_area2km
   dplyr::select(starts_with("z_")) %>%
-  dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, z_poi_count, z_reports, z_buildings_count, z_poi_log)) %>% # z_poi_count_grouped
+  dplyr::select(-c(z_saltwater_km2, z_urban_km2, z_suburban_km2, 
+                   z_poi_count, z_reports, z_buildings_count, 
+                   z_poi_log, z_livestock_density, z_freshwater_km2_log)) %>% 
   as.matrix()
 
 z_poi <- as.data.frame(z_land_data) %>%
@@ -110,36 +112,194 @@ stopifnot(!any(is.na(z_WS_rain_clean)))
 cat("✓ All missing values handled\n\n")
 
 
-# ============================================================================
-# COORDS FOR GP APPROX
-# ============================================================================
+#=============================================================================
+# HSGP DATA PREPARATION - CORRECT IMPLEMENTATION
+#=============================================================================
 
+# 1. Convert to kilometers
 grid_coords_km <- coords_2point5km / 1000
 
-# Domain boundaries (for basis function construction)
-L_x <- diff(range(grid_coords_km[, 1]))
-L_y <- diff(range(grid_coords_km[, 2]))
+# 2. Center coordinates (this is what the paper requires!)
+grid_coords_centered <- scale(grid_coords_km, center = TRUE, scale = FALSE)
 
-scale_coords_to_L <- function(coords, L) {
-  # Center coordinates
-  coords_centered <- scale(coords, center = TRUE, scale = FALSE)
-  
-  # Scale to [-L, L] range
-  max_abs <- max(abs(coords_centered))
-  if (max_abs > 0) {
-    coords_scaled <- coords_centered * (L / max_abs)
-  } else {
-    coords_scaled <- coords_centered
-  }
-  return(coords_scaled)
+# 3. Compute half-ranges
+S_x <- max(abs(grid_coords_centered[, 1]))
+S_y <- max(abs(grid_coords_centered[, 2]))
+
+range(grid_coords_centered[,1])
+range(grid_coords_centered[,2])
+
+# 4. Set boundary factor
+c <- 1.5  # Paper recommends 1.2-1.5
+
+# 5. Compute boundaries
+L_x <- c * S_x
+L_y <- c * S_y
+
+# 6. Choose number of basis functions
+# Rule of thumb: M_sqrt should scale with (c * S) / rho 
+# posterior rho is around 7: 1.5*837/7 = ~180
+# With large domain and small rho, need more basis functions
+M_sqrt <- 20  # Conservative choice (400 total basis functions)
+
+# 7. Diagnostic output
+cat("HSGP Configuration:\n")
+cat("==================\n")
+cat("Domain extent:\n")
+cat("  X range:", range(grid_coords_centered[,1]), "km\n")
+cat("  Y range:", range(grid_coords_centered[,2]), "km\n")
+cat("\nHalf-ranges (S):\n")
+cat("  S_x =", round(S_x, 2), "km\n")
+cat("  S_y =", round(S_y, 2), "km\n")
+cat("\nBoundary factor: c =", c, "\n")
+cat("\nBoundaries (L = c × S):\n")
+cat("  L_x =", round(L_x, 2), "km\n")
+cat("  L_y =", round(L_y, 2), "km\n")
+cat("\nBasis functions:\n")
+cat("  M_sqrt =", M_sqrt, "\n")
+cat("  Total M =", M_sqrt^2, "\n")
+cat("\nExpected lengthscale range:\n")
+cat("  Suggested: ρ > c*S/M_sqrt ≈", round(c*mean(c(S_x,S_y))/M_sqrt, 2), "km\n")
+
+# 8. Verify coverage
+if (!all(abs(grid_coords_centered[, 1]) <= L_x) || 
+    !all(abs(grid_coords_centered[, 2]) <= L_y)) {
+  stop("ERROR: Some coordinates fall outside [-L, L] domain!")
+} else {
+  cat("\n✓ All coordinates within domain boundaries\n")
 }
 
-# Use L_x and L_y from your calculation, can be adjusted
-# Typically L is about 1.5 times the maximum coordinate value
-L_factor <- 1.5  # Adjust as needed
+# =============================================================================
+# NNGP PREPROCESSING: BUILD NEAREST-NEIGHBOUR STRUCTURE VIA spNNGP
+# =============================================================================
+# This script uses the official NNMatrix() wrapper (from the Stan NNGP case
+# study by Lu Zhang) which internally calls spNNGP::spConjNNGP() to build the
+# neighbour index efficiently.
+# https://mc-stan.org/learn-stan/case-studies/nngp.html#latent-nngp-model-for-simulation-study
+# https://github.com/LuZhangstat/NNGP_STAN/tree/master
 
-# Scale coordinates
-grid_coords_scaled <- scale_coords_to_L(grid_coords_km, L_factor * max(L_x, L_y))
+library(spNNGP)
+source("NNMatrix.R")   # Load the NNMatrix wrapper and helpers
+
+
+# -----------------------------------------------------------------------------
+# PARAMETERS
+# -----------------------------------------------------------------------------
+M <- 10   # Number of nearest neighbours. 10 is a reasonable default;
+# increase to 15 for better approximation at the cost of speed.
+
+# -----------------------------------------------------------------------------
+# STEP 1: DEFINE COORDINATES
+# -----------------------------------------------------------------------------
+# coords_2point5km should be an [n_grids_total x 2] matrix of grid centroids
+# in km (or whatever unit your distances are in — must match rho_gp prior).
+# This is the same coordinate object you previously passed to Stan as
+# grid_coords[n_grids_total, 2].
+
+# Replace with your actual coordinates, e.g.:
+# coords_2point5km <- st_coordinates(your_grid_sf) / 1000   # convert m -> km
+
+N <- nrow(coords_2point5km)
+cat("Number of grid cells (N):", N, "\n")
+cat("Number of nearest neighbours (M):", M, "\n")
+
+# -----------------------------------------------------------------------------
+# STEP 2: BUILD NEAREST-NEIGHBOUR STRUCTURE
+# -----------------------------------------------------------------------------
+# NNMatrix() handles:
+#   - Ordering of locations (default: x-axis ordering)
+#   - kNN search (fast "cb" algorithm; use "brute" if on a regular grid
+#     with many identical x-coordinates)
+#   - Computing NN_ind, NN_dist, NN_distM
+
+NN.matrix <- NNMatrix(
+  coords         = coords_2point5km,
+  n.neighbors    = M,
+  n.omp.threads  = 2,
+  search.type    = "cb"    # use "brute" if coords fall on a regular grid
+)
+
+str(NN.matrix)
+
+# Quick sanity check: visualise neighbours of one location
+# Check_Neighbors(NN.matrix$coords.ord, M, NN.matrix, ind = 500)
+
+# -----------------------------------------------------------------------------
+# STEP 3: REORDER ALL GRID-INDEXED DATA
+# -----------------------------------------------------------------------------
+# NN.matrix$ord is the permutation vector. Every array indexed by grid cell
+# (1:n_grids_total) must be reordered using this before passing to Stan.
+#
+# inv_ord maps Stan's internal ordered indices back to original grid indices
+# (useful for plotting posterior spatial fields).
+
+ord     <- NN.matrix$ord
+inv_ord <- order(ord)   # inverse permutation: ordered -> original
+
+# Reorder all grid-indexed Stan data arrays:
+z_land_ord      <- z_land[ord, ]
+z_poi_ord       <- z_poi[ord]
+z_reports_ord   <- z_reports[ord]
+area_grid_ord   <- area_grid[ord]
+z_temp_ord      <- z_temp_clean[ord, ]
+z_rain_ord      <- z_rain_clean[ord, ]
+
+# Remap observation-level grid indices.
+# If site_to_grid[k] = g means "observation k is at original grid g",
+# after reordering, that grid's new position is inv_ord[g]:
+site_to_grid_ord <- inv_ord[site_to_grid]
+po_grid_idx_ord  <- inv_ord[as.integer(cs_presences$grid_id_1)]
+obs_grid_idx_ord <- inv_ord[obs_grid_idx]
+
+# -----------------------------------------------------------------------------
+# STEP 4: BUILD THE STAN DATA LIST
+# -----------------------------------------------------------------------------
+# Add the NNGP fields to existing stan_data.
+# These REPLACE the old HSGP fields: M_sqrt, L_x, L_y, grid_coords.
+
+stan_data <- list(
+  # --- Unchanged dimensions ---
+  n_grids_total = n_grids_total,  
+  n_grids_obs = n_grids_obs,   # Only observed grids
+  n_dates = ncol(z_temp_clean),
+  n_obs_y = nrow(survey_df),
+  n_obs_po = nrow(cs_presences),
+  n_land_covs = ncol(z_land),
+
+  # --- Reordered grid arrays ---
+  z_temp        = z_temp_clean[ord, ],
+  z_rain        = z_rain_clean[ord, ],
+  z_land        = z_land[ord, ],
+  z_poi         = z_poi[ord],
+  z_reports     = z_reports[ord],
+  area_grid     = area_grid[ord],
+
+  # --- Remapped observation indices ---
+  site_to_grid  = inv_ord[site_to_grid],
+  po_grid_idx   = inv_ord[po_grid_idx],
+  obs_grid_idx  = inv_ord[obs_grid_idx],
+  date_y        = as.integer(survey_df$date_1),          # unchanged (not grid-indexed)
+  date_po       = as.integer(cs_presences$date_1),
+  trap_type     = as.integer(survey_df$trap_type_idx),
+  z_RH = z_RH_clean,
+  z_WS_rain = z_WS_rain_clean,
+  y             = as.integer(survey_df$Culex),
+  ones          = rep(1L, nrow(cs_presences)),
+  survey_grid_idx = as.integer(survey_df$grid_id_1),
+ 
+
+  # --- Other unchanged scalars ---
+  CONSTANT      = 10000,
+  N_multiplier  = 40,
+  grainsize     = 10,
+
+  # --- NEW: NNGP fields (replaces M_sqrt, L_x, L_y, grid_coords) ---
+  M        = M,
+  NN_ind   = NN.matrix$NN_ind,
+  NN_dist  = NN.matrix$NN_dist,
+  NN_distM = NN.matrix$NN_distM
+)
+
 
 
 # ============================================================================
@@ -221,11 +381,12 @@ stan_data <- list(
   z_RH = z_RH_clean,
   z_WS_rain = z_WS_rain_clean,
   
-  # GP approximation
-  M_sqrt = 7,  # Since M = 49, M_sqrt = 7
-  grid_coords = grid_coords_scaled,
-  L_x = L_factor * L_x,  # Increase boundary slightly
-  L_y = L_factor * L_y,
+  # HSGP parameters
+  grid_coords = grid_coords_centered,
+  L_x = result$L_x,
+  L_y = result$L_y,
+  M_sqrt = 50,
+  grid_coords = grid_coords_centered,  # already centered, no more scaling!
   
   # Other
   area_grid = area_grid,
@@ -292,17 +453,17 @@ init_fun <- function() {
     phi = abs(rnorm(1, 2, 0.5)) + 0.5, # Ensure positive, add small offset
     
     # --------------------
-    # GP; HSGP parameters
+    # GPparameters
     #     #marginalised_approxGP.stan // test2.stan
     # --------------------
+    w_gp     = rep(0, N),
+    #   alpha_gp = 1,
+    #   rho_gp   = 5
     rho_gp = abs(rnorm(1, 30, 5)) + 1.0,    # Add positive offset # Reasonable length-scale (km)
     alpha_gp = abs(rnorm(1, 0.5, 0.1)) + 0.1, # Add positive offset alpha_gp = 0.5,  # Start small
     beta_gp_raw = rnorm(stan_data$M_sqrt^2, 0, 0.1)
   )
 }
-
-
-
 
 # ============================================================================
 # 6. SAVE PREPARED DATA

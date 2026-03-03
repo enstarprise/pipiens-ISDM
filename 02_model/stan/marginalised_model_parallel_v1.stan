@@ -50,7 +50,7 @@ functions {
     return lp;
   }
   
-  // NEW: parallelized lambda computation for grid chunks
+  //  parallelized lambda computation for grid chunks
   matrix partial_lambda_base(int start, int end,
                             matrix z_temp,
                             matrix z_rain,
@@ -77,7 +77,7 @@ functions {
     return lambda_chunk;
   }
   
-  // NEW: parallelized PO likelihood
+  //  parallelized PO likelihood
   real partial_sum_po(array[] int ones_slice,
                      int start, int end,
                      array[] int po_grid_idx,

@@ -16,21 +16,6 @@
 # rm(list = ls())
 gc()
 
-# Set CRAN mirror
-options(repos = c(CRAN = "https://cloud.r-project.org"))
-
-#===============================================================================
-# PACKAGE MANAGEMENT
-#===============================================================================
-
-# Define required packages
-required_packages <- c(
-  # Modeling
-  "cmdstanr"       #cmdstanr
-
-)
-
-# Suppress startup messages for cleaner output
 suppressPackageStartupMessages({
   library(tidyverse)
   library(dplyr)
@@ -38,63 +23,25 @@ suppressPackageStartupMessages({
   library(cmdstanr)
 })
 
-
-# ============================================================================
-# \PREPARE DATA 
-# ============================================================================
-
-#  data preparation script
-# creates: stan_data_marginalized.rds
-# source("02_model/stan/01_prepare_stan_data_impute.R")
-
-# # load 
-# load("01_data/processedCovariates/1km/stan_data_init_obsgrid_imputation_1km.RData")
-# load("01_data/processedCovariates/1km/stan_data_init_obsgrid_1km.RData")
-# load("01_data/processedCovariates/1km/01_5kpixel_test/5k_pixelSubset.RData"); stan_data <- subset_stan_data
-
-# stan_data <- readRDS("01_data/processedCovariates/1km/stan_data_imputation_1km.rds")
-# obs_grid_ids <- readRDS("01_data/processedCovariates/1km/observed_grid_ids_1km.rds")
-
-load("01_data/processedCovariates/2.5km/stan_data_init_obsgrid_2.5km.RData")
-
-# load diagnostic function
-# source("02_model/stan/02_stan_test_utilities.R")
-# diagnose_stan_data(stan_data)
-
-# ============================================================================
-# TEST oN SIM DATA 
-# ===========================================================================
-
-#test the function alone
-# test_marginalization_function()
-# 
-# # quick test
-# test_result <- quick_model_test(
-#   stan_file = "02_model/marginalised_model.stan",
-#   n_grids = 100,
-#   n_dates = 100,
-#   n_obs_y = 30,
-#   chains = 2,
-#   iter_warmup = 100,
-#   iter_sampling = 100
-# )
-
+# stan_data_GIRDRES_MODELTYPE_GRIDSCOPE_QUADRATIC.RData
+load("01_data/processedCovariates/2.5km/stan_data_2.5km_nonspatial_observed_none.RData")
 
 # ============================================================================
 #  MODEL RUN 
 # ============================================================================
 
-# stan_data$quantile_prob <- 0.999  # 99.9% coverage
-# stan_data$grainsize_survey <- 10
-# stan_data$grainsize_po <- 1
-# stan_data$grainsize <- 10
-# stan_data$N_max_quantile <- 0.999 # 0.999 for 99.9th percentile
+stan_data$N_max <- 15
 
 
-stan_data$N_max <- 5
+test_init <- init_fun()
+print("Initial beta_land values:")
+print(test_init$beta_land)
+print("Should be around ±0.03")
 
-model <- cmdstan_model("02_model/stan/marginalised_approxGP.stan",
+
+model <- cmdstan_model("02_model/stan/model_nonspatial_poisson.stan",
                        cpp_options = list(stan_threads = TRUE))
+
 
 fit <- model$sample(
   data = stan_data,
@@ -108,9 +55,17 @@ fit <- model$sample(
   init = init_fun,
   seed = 123,
   refresh = 25,
-  show_messages = TRUE  # See more output
+  output_dir = "02_model/stan/modelRuns/",
+  show_messages = TRUE  
 )
 
+
+saveRDS(fit,"02_model/stan/modelRuns/model_nonspatial_poisson.rds")
+
+
+fit_nb <- readRDS("02_model/stan/modelRuns/model_nonspatial2.rds")
+# fit_quad <- readRDS("02_model/stan/modelRuns/model_nonspatial_quad_both.rds")
+# fit_hsgp <- readRDS("02_model/stan/modelRuns/model_spatialHSGP.rds")
 
 # ============================================================================
 # DIAGNOSTICS
@@ -131,17 +86,6 @@ if (any(diag$num_max_treedepth > 0)) {
   cat("  try inc max_treedepth = 15\n")
 }
 
-# convergence (Rhat)
-params_summary <- fit$summary()
-high_rhat <- params_summary %>% filter(rhat > 1.05)
-
-if (nrow(high_rhat) > 0) {
-  print(high_rhat[, c("variable", "rhat", "ess_bulk")])
-  cat("\n  try running longer chains??? \n")
-} else {
-  cat("\n✓ all rhat values < 1.05\n")
-}
-
 # ============================================================================
 # EXTRACT AND SUMMARIZE RESULTS
 # ============================================================================
@@ -150,29 +94,14 @@ if (nrow(high_rhat) > 0) {
 main_params <- c(
   "beta0", "beta_temp", "beta_rain", "beta_land",
   "alpha0", "alpha_RH", "alpha_WS_rain", "sigma_trap", "alpha_trap",
-  "delta0", "delta_poi", "delta_reports",
-  "phi"
+  "delta0", "delta_poi", "delta_reports"
 )
 
 results <- fit$summary(main_params)
 print(results)
 
-# ============================================================================
-# SAVE RESULTS
-# ============================================================================
-# save fit object
-fit$save_object("03_posterior/results/stan_fit_marginalized_1km_5kpixels.rds")
-
-# Save summary
-write_csv(results, "03_posterior/results/parameter_estimates_1km.csv")
-
-# extract draws 
-draws <- fit$draws(format = "df")
-saveRDS(draws, "03_posterior/results/posterior_draws_1km.rds")
-
-fit <- readRDS("03_posterior/results/stan_fit_marginalized_1km.rds")
-draws <- readRDS("03_posterior/results/posterior_draws_1km.rds")
-
+# # Save summary
+# write_csv(results, "03_posterior/results/parameter_estimates.csv")
 
 
 # ============================================================================
@@ -204,30 +133,65 @@ bayesplot::mcmc_areas(
 ) + ggplot2::ggtitle("Posterior Distributions with Credible Intervals") +
   theme_bw()
 
+# ===========================================================================
+# MODEL COMPARISON 
+# ===========================================================================
+library(loo)
+library(posterior)
+
+# survey log-lik
+log_lik_survey_1 <- fit$draws("log_lik_survey")
+log_lik_survey_2 <- fit_nb$draws("log_lik_survey")
+
+# convert to matrix: draws x observations
+ll_survey_1 <- as_draws_matrix(log_lik_survey_1)
+ll_survey_2 <- as_draws_matrix(log_lik_survey_2)
+
+loo_survey_1 <- loo(ll_survey_1)
+loo_survey_2 <- loo(ll_survey_2)
+
+loo_compare(loo_survey_1, loo_survey_2)
+
+plot(loo_survey_1)
+plot(loo_survey_2)
+
+loo_survey_1
+loo_survey_2
+
+# citizen science
+ll_po_1 <- as_draws_matrix(fit$draws("log_lik_po"))
+ll_po_2 <- as_draws_matrix(fit_nb$draws("log_lik_po"))
+
+loo_po_1 <- loo(ll_po_1)
+loo_po_2 <- loo(ll_po_2)
+
+loo_compare(loo_po_1, loo_po_2)
+
+loo_po_1
+loo_po_2
+
+
+ll_joint_1 <- cbind(ll_survey_1, ll_po_1)
+ll_joint_2 <- cbind(ll_survey_2, ll_po_2)
+
+loo_joint_1 <- loo(ll_joint_1)
+loo_joint_2 <- loo(ll_joint_2)
+
+loo_compare(loo_joint_1, loo_joint_2)
+
 
 # ============================================================================
 # PPC for SURVEY
 # ============================================================================
-
-# # extract N_expected
-# N_expected <- fit$summary("N_expected")
-# 
-# cat("Expected abundance statistics:\n")
-# cat(sprintf("  Mean: %.2f\n", mean(N_expected$mean)))
-# cat(sprintf("  SD: %.2f\n", sd(N_expected$mean)))
-# cat(sprintf("  Range: [%.2f, %.2f]\n", 
-#             min(N_expected$mean), max(N_expected$mean)))
-
 # Extract posterior predictive samples
-y_rep_draws <- fit$draws("y_rep", format = "draws_matrix")
-# Or if you want an array: fit$draws("y_rep", format = "draws_array")
+y_rep_draws <- fit_nb$draws("y_rep", format = "draws_matrix")
 
-# Calculate summary statistics for each posterior draw
+# summary statistics for each  draw
 ppc_summary <- function(y_rep_matrix, y_obs) {
   n_draws <- nrow(y_rep_matrix)
   n_obs <- length(y_obs)
   
-  # Calculate statistics for each draw
+  #  statistics 
   stats <- matrix(NA, nrow = n_draws, ncol = 4)
   colnames(stats) <- c("mean", "sd", "max", "zeros")
   
@@ -275,7 +239,8 @@ library(ggplot2)
 # Plot 1: Distribution of test statistics
 color_scheme_set("brightblue")
 ppc_stat(y = stan_data$y, yrep = y_rep_draws[1:500, ], stat = "mean") +
-  ggtitle("Posterior Predictive Check: Mean")
+  ggtitle("Posterior Predictive Check: Mean") +
+  theme_minimal()
 
 ppc_stat(y = stan_data$y, yrep = y_rep_draws[1:500, ], stat = "sd") +
   ggtitle("Posterior Predictive Check: Standard Deviation")
@@ -344,8 +309,6 @@ ggplot(data.frame(ratio = as.numeric(max_N_ratio)), aes(x = ratio)) +
   theme_minimal()
 
 
-
-
 # ============================================================================
 # SPATIAL FIELD VISUALISATION
 # ============================================================================
@@ -383,9 +346,6 @@ library(ggplot2)
 library(viridis)
 library(sf)
 library(sp)
-
-# Convert to spatial object
-spatial_sf <- st_as_sf(spatial_df, coords = c("easting", "northing"))
 
 # 1. Mean spatial field
 p1 <- ggplot(spatial_df, aes(x = easting, y = northing, fill = spatial_mean)) +

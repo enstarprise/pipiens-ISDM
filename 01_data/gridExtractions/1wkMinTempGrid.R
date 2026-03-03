@@ -37,7 +37,7 @@ scotland <- st_transform(scotland,crs = 27700)
 # plan(sequential) # reset to sequential
 # st_write(grid_clipped_1km, "grids/grid_clipped_1km.gpkg")
 
-grid_clipped <- st_read("grids/grid_clipped_1km.gpkg")
+grid_clipped <- st_read("01_data/grids/grid_clipped_1km.gpkg")
 # grid_clipped <- st_read("01_data/grids/grid_clipped_2point5km.gpkg")
 
 #-----------# 1. create Spatial version of grid---------------
@@ -78,7 +78,7 @@ find_nearest_grid_bng <- function(x, y, x_coords, y_coords) {
 }
 
 # 3. Modified to calculate 21-day mean min temp
-get_7d_mean_min_temp <- function(target_date, x_idx, y_idx, nc_data_list) {
+get_mean_min_temp <- function(target_date, x_idx, y_idx, nc_data_list) {
   start_date <- target_date - 20  # 20-day window (inclusive)
   temp_values <- numeric(0)
   
@@ -151,7 +151,7 @@ filter_nc_files_for_temp_range <- function(nc_dir, start_date, end_date) {
 #   nc_close(nc_ref)
 # 
 #   # --- 4. Process each target date in parallel
-#   message("Extracting 7-day mean min temperatures...")
+#   message("Extracting 21-day mean min temperatures...")
 # 
 #   results <- future_lapply(dates_to_extract, function(target_date) {
 #     start_date <- target_date - 20
@@ -160,7 +160,7 @@ filter_nc_files_for_temp_range <- function(nc_dir, start_date, end_date) {
 #     nc_files <- filter_nc_files_for_temp_range(nc_dir, start_date, target_date)
 #     if (length(nc_files) == 0) return(NULL)
 # 
-#     # Load and stack temperature data for the 7-day window
+#     # Load and stack temperature data for the 21-day window
 #     temp_data <- load_nc_temp_data(nc_files)
 #     all_dates <- unlist(lapply(temp_data, `[[`, "dates"))
 #     temp_stack <- abind::abind(lapply(temp_data, `[[`, "temperature"), along = 3)
@@ -242,7 +242,7 @@ extract_grid_temp_ts_optimized <- function(grid_df, dates_to_extract, nc_dir, n_
     all_dates <- unlist(lapply(temp_data, `[[`, "dates"))
     temp_stack <- abind::abind(lapply(temp_data, `[[`, "temperature"), along = 3)
     
-    # Create date mask for the 7-day window
+    # Create date mask for the 21-day window
     date_mask <- (all_dates >= (target_date - 20)) & (all_dates <= target_date)
     if (!any(date_mask)) return(NULL)
     
@@ -347,7 +347,7 @@ test_dates <- as.Date(c("2023-06-15", "2023-07-15"))
 #   "gridExtractions/covariates/daily/"
 # )
 
-print(test_results)
+# print(test_results)
 
 # Manually check values at known locations
 test_idx <- find_nearest_grid_bng(213029.2, 531101.4, x_coords, y_coords)
@@ -367,7 +367,9 @@ survey_df_new$Setup_date <- as.Date(survey_df_new$Setup_date,
 
 
 cs_df_new <- read_csv("01_data/csvs/cs_df.csv")
-cs_df_new <- cs_df_new %>% filter(Verified_mosquito == "Yes" & Species == "pipiens" & Stage == "Adult")
+cs_df_new <- cs_df_new %>% filter(Verified_mosquito == "Yes" & 
+                                    Species == "pipiens" & 
+                                    Stage == "Adult")
 
 cs_df_new$Date_found <- as.Date(cs_df_new$Date_found, 
                                 format = "%d/%m/%Y")

@@ -8,30 +8,11 @@ library(lubridate)
 plan(multisession)  # For parallel processing
 
 # --- scotland boundary ---
-scotland <- st_read("gridExtractions/scotlandBoundary/scotland_boundary.shp")
+scotland <- st_read("01_data/gridExtractions/scotlandBoundary/scotland_boundary.shp")
 scotland <- st_transform(scotland,crs = 27700)
 
-# grid_1km <- st_make_grid(scotland, cellsize = 1000, square = TRUE)
-# grid_1km <- st_sf(grid_id = 1:length(grid_1km), geometry = grid_1km)
-# st_write(grid_1km, "grids/grid_1km.gpkg")
-
-# plan(multisession, workers = 10)  # use 10 cores # plan(multisession, workers = availableCores() - 1)
-# n_chunks <- 40  # 40/10 = 4 chunks of the dataset per core
-# grid_split <- split(grid_1km, cut(1:nrow(grid_1km), n_chunks, labels = FALSE))
-
-# parallel intersection
-# grid_clipped_list <- future_map(
-#   grid_split,
-#   ~ st_intersection(.x, scotland),
-#   .options = furrr_options(seed = TRUE)
-# ) # 5 minute run time
-
-# grid_clipped_1km <- do.call(rbind, grid_clipped_list) # combine results
-# plan(sequential) # reset to sequential
-# st_write(grid_clipped_1km, "grids/grid_clipped_1km.gpkg")
-
-grid_1km <- st_read("grids/grid_1km.gpkg")
-grid_clipped <- st_read("grids/grid_clipped_1km.gpkg")
+grid_1km <- st_read("01_data/grids/grid_1km.gpkg")
+grid_clipped <- st_read("01_data/grids/grid_clipped_1km.gpkg")
 
 #-----------# 1. create Spatial version of grid---------------
 grid_1km$ID <- 1:nrow(grid_1km)
@@ -71,7 +52,7 @@ find_nearest_grid_bng <- function(x, y, x_coords, y_coords) {
 }
 
 # 3. Modified to calculate 7-day mean max temp
-get_7d_mean_max_temp <- function(target_date, x_idx, y_idx, nc_data_list) {
+get_mean_max_temp <- function(target_date, x_idx, y_idx, nc_data_list) {
   start_date <- target_date - 6  # 7-day window (inclusive)
   temp_values <- numeric(0)
   
@@ -117,57 +98,6 @@ filter_nc_files_for_temp_range <- function(nc_dir, start_date, end_date) {
   return(nc_files[matching_files])
 }
 
-# 5. Modified main extraction function for temperature
-# extract_grid_temp_ts_optimized <- function(grid_df, dates_to_extract, nc_dir) {
-  # Load first file to get spatial reference
-#   nc_ref <- nc_open(list.files(nc_dir, pattern = "tasmax.*\\.nc$", full.names = TRUE)[1])
-#   x_coords <- ncvar_get(nc_ref, "projection_x_coordinate")
-#   y_coords <- ncvar_get(nc_ref, "projection_y_coordinate")
-#   nc_close(nc_ref)
-#   
-#   # Pre-compute all grid indices (vectorized)
-#   grid_idx <- t(apply(grid_df[, c("x_bng", "y_bng")], 1, function(coord) {
-#     find_nearest_grid_bng(coord[1], coord[2], x_coords, y_coords)
-#   }))
-#   colnames(grid_idx) <- c("grid_x", "grid_y")
-#   grid_df <- cbind(grid_df, grid_idx)
-#   
-#   # Process dates in parallel
-#   results <- future_lapply(dates_to_extract, function(target_date) {
-#     # Load required NetCDF files
-#     nc_files <- filter_nc_files_for_temp_range(nc_dir, target_date - 6, target_date)
-#     if (length(nc_files) == 0) return(NULL)
-#     
-#     # Load and stack temperature data
-#     temp_data <- load_nc_temp_data(nc_files)
-#     all_dates <- unlist(lapply(temp_data, `[[`, "dates"))
-#     temp_stack <- abind::abind(lapply(temp_data, `[[`, "temperature"), along = 3)
-#     
-#     # Create date mask for the 7-day window
-#     date_mask <- (all_dates >= (target_date - 6)) & (all_dates <= target_date)
-#     if (!any(date_mask)) return(NULL)
-#     
-#     # Vectorized extraction for all grids
-#     temp_values <- sapply(1:nrow(grid_df), function(i) {
-#       if (any(is.na(grid_df[i, c("grid_x", "grid_y")]))) return(NA)
-#       mean(temp_stack[grid_df$grid_x[i], grid_df$grid_y[i], date_mask], na.rm = TRUE)
-#     })
-#     
-#     data.frame(
-#       grid_id = grid_df$grid_id,
-#       date = target_date,
-#       x_bng = grid_df$x_bng,
-#       y_bng = grid_df$y_bng,
-#       mean_max_temp_7d_celsius = round(temp_values, 1),
-#       start_date = target_date - 6,
-#       end_date = target_date,
-#       stringsAsFactors = FALSE
-#     )
-#   }, future.seed = TRUE)
-#   
-#   # Combine and return results
-#   do.call(rbind, results[!sapply(results, is.null)])
-# }
 
 extract_grid_temp_ts_optimized <- function(grid_df, dates_to_extract, nc_dir, n_cores = NULL) {
   library(future.apply)
@@ -266,7 +196,7 @@ get_unique_extraction_dates <- function(..., date_columns) {
 # ---- 1. Setup ----
 
 # Verify coordinate ranges with temperature files
-nc_first <- nc_open(list.files("gridExtractions/covariates/daily/", 
+nc_first <- nc_open(list.files("01_data/gridExtractions/covariates/daily/", 
                                pattern = "tasmax_hadukgrid_uk_1km_day_.*\\.nc$", 
                                full.names = TRUE)[1])
 x_coords <- ncvar_get(nc_first, "projection_x_coordinate")
@@ -283,7 +213,7 @@ print(paste("NetCDF Y range:", min(y_coords), "-", max(y_coords)))
 # Test 1: Basic file filtering
 test_date <- as.Date("2023-07-01")
 test_files <- filter_nc_files_for_temp_range(
-  "gridExtractions/covariates/daily/", 
+  "01_data/gridExtractions/covariates/daily/", 
   test_date - 20, 
   test_date
 )
@@ -291,8 +221,8 @@ print(test_files)
 
 # Test file loading independently
 test_files <- c(
-  "gridExtractions/covariates/daily/tasmax_hadukgrid_uk_1km_day_20230601-20230630.nc",
-  "gridExtractions/covariates/daily/tasmax_hadukgrid_uk_1km_day_20230701-20230731.nc"
+  "01_data/gridExtractions/covariates/daily/tasmax_hadukgrid_uk_1km_day_20230601-20230630.nc",
+  "01_data/gridExtractions/covariates/daily/tasmax_hadukgrid_uk_1km_day_20230701-20230731.nc"
 )
 
 test_data <- load_nc_temp_data(test_files)
@@ -317,14 +247,14 @@ test_dates <- as.Date(c("2023-06-15", "2023-07-15"))
 test_results <- extract_grid_temp_ts_optimized(
   grid_df[1:5,], 
   test_dates, 
-  "gridExtractions/covariates/daily/"
+  "01_data/gridExtractions/covariates/daily/"
 )
 print(test_results)
 
 test_results <- extract_grid_temp_ts_optimized(
   grid_df[1:5,], 
   test_dates, 
-  "gridExtractions/covariates/daily/"
+  "01_data/gridExtractions/covariates/daily/"
 )
 print(test_results)
 
@@ -339,70 +269,27 @@ print(raw_values)  # Should be 250-320 Kelvin (reasonable temperatures)
 nc_close(nc)
 
 # ---- 4. Full Extraction ----
-library(readxl)
-survey_df_new <- read_excel("csvs/survey_df_new.xlsx")
-survey_df_new$Collection_date <- as.Date(survey_df_new$Collection_date, 
-                                                        format = "%d/%m/%Y")
-cs_df_new <- read_excel("csvs/cs_df_new.xlsx")
+
+survey_df_new <- read_csv("01_data/csvs/survey_df.csv")
+survey_df_new$Setup_date <- as.Date(survey_df_new$Setup_date, 
+                                    format = "%d/%m/%Y")
+
+cs_df_new <- read_csv("01_data/csvs/cs_df.csv")
+cs_df_new <- cs_df_new %>% filter(Verified_mosquito == "Yes" & 
+                                    Species == "pipiens" & 
+                                    Stage == "Adult")
+
 cs_df_new$Date_found <- as.Date(cs_df_new$Date_found, 
                                 format = "%d/%m/%Y")
 
-
 dates_to_extract <- get_unique_extraction_dates(
   survey_df_new, cs_df_new, 
-  date_columns = c("Collection_date", "Date_found")
+  date_columns = c("Setup_date", "Date_found")
 )
+dates_to_extract[1]
 
-# dates_to_extract <- get_unique_extraction_dates(
-#   surveillance_data, citizenScience_data, 
-#   date_columns = c("Collection_date", "Date_found")
-# )
 
-# Run the extraction
-# temp_grid_ts <- extract_grid_temp_ts_optimized(
-#   grid_df,
-#   dates_to_extract,
-#   "gridExtractions/covariates/daily/"  # Directory with temperature NetCDF files
-# )
-# 
-# library(future.apply)
-# plan(multisession, workers = 10) 
-# 
-# library(progressr) # Run with progress monitoring
-# handlers(
-#   handler_progress(
-#     format = ":spin :current/:total (:message) [:bar] :percent",
-#     width = 60
-#   )
-# )
-# 
-# with_progress({
-#   temp_grid_ts <- extract_grid_temp_ts_optimized(grid_clipped,  # <- Use the sf object
-#                                                  dates_to_extract, 
-#                                                  nc_dir = "gridExtractions/covariates/daily/")
-# })
-# 
-# 
-# tasmax_grid <- temp_grid_ts
-# 
-# write.csv(tasmax_grid, 
-#           file = "csvs/tasmax_grid.csv",
-#           row.names = FALSE)
-
-### #########jsut the new dates!!
-# Filter for June–September
-# citizenScience_data_newDates <- citizenScience_data %>%
-#   filter(month(Date_found) %in% 6:9)
-# 
-# surveillance_data_newDates <- surveillance_data %>%
-#   filter(month(Collection_date) %in% 2:4)
-# 
-# dates_to_extract <- get_unique_extraction_dates(
-#   surveillance_data_newDates, citizenScience_data_newDates,
-#   date_columns = c("Collection_date",  "Date_found")
-# )
-
-nc_dir = "gridExtractions/covariates/daily/" 
+nc_dir = "01_data/gridExtractions/covariates/daily/" 
 
 library(pbapply)
 library(parallel)
@@ -413,8 +300,7 @@ library(ncdf4)
 library(abind)
 
 # Extract coordinates from sf object
-coords <- st_coordinates(st_centroid(grid_clipped)) 
-
+coords <- st_coordinates(st_centroid(grid_clipped))
 grid_df <- data.frame(
   grid_id = grid_clipped$grid_id,
   x_bng = coords[, 1],
@@ -461,10 +347,10 @@ head(final_result)
 cat("Total rows:", nrow(final_result), "\n")
 cat("Expected:", length(dates_to_extract) * nrow(grid_df), "\n")
 
-tasmax_grid <- final_result
+tasmin_grid <- final_result
 
-write.csv(tasmax_grid, 
-          file = "csvs/tasmax_grid_new2.csv",
+write.csv(tasmin_grid, 
+          file = "01_data/csvs/tasmax_grid_21day_2point5km.csv",
           row.names = FALSE)
 
 

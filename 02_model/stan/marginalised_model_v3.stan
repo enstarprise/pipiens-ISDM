@@ -31,7 +31,7 @@ functions {
     return N;
   }
   
-  // marg. LL with he adaptive N_max
+  // marg. LL with the adaptive N_max
   real binomial_negbin_marginal_lpmf(int y_obs, real p_detect, 
                                      real lambda, real phi, int N_max) {
     vector[N_max - y_obs + 1] log_components;

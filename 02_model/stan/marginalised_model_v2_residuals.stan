@@ -130,7 +130,7 @@ parameters {
 }
 
 transformed parameters {
-  //  lambda for observed grids to save computation
+  //  lambda for observed grids...
   matrix[n_grids_total, n_dates] lambda_base;   
   
   // but need lambda_thinned for ALL grids for PO likelihood
@@ -155,15 +155,14 @@ transformed parameters {
                             beta_temp * z_temp[g, t] +
                             beta_rain * z_rain[g, t] +
                             dot_product(beta_land, z_land[g, ]);
-      //log_lambda_base = fmin(fmax(log_lambda_base, -20), 20);
 
-      lambda_base[g, t] = exp(log_lambda_base);               //  store actual lambda
-      lambda_thinned[g, t] = lambda_base[g, t] *             // and thenuse it here too
+      lambda_base[g, t] = exp(log_lambda_base);     //  store actual lambda
+      lambda_thinned[g, t] = lambda_base[g, t] *    // and thenuse it here too
                              area_grid[g] * p_thin;
     }
   }
   
-  // nackground for PO likelihood
+  // background for PO likelihood
   for (t in 1:n_dates) {
     background[t] = sum(lambda_thinned[, t]) / n_obs_po;
   }
@@ -193,7 +192,7 @@ model {
   target += reduce_sum(
     partial_sum,
     y,
-    grainsize,   // grainsize: start with 50 or 100, tune later
+    grainsize, // declared in stan data list
     site_to_grid, date_y, trap_type,
     z_RH, z_WS_rain,
     lambda_base,
@@ -202,7 +201,7 @@ model {
 );
 
   // for (k in 1:n_obs_y) {
-  //   int i = site_to_grid[k];  // Index into observed grids
+  //   int i = site_to_grid[k];  // index into observed grids
   //   int t = date_y[k];
   //   real lambda = lambda_base[site_to_grid[k], t];
   //   real p_trap = inv_logit(alpha0 + 
@@ -223,21 +222,58 @@ model {
   }
 }
 
-
-
 generated quantities {
-  array[n_obs_y] int y_rep;
+  // -------------------------------------------------
+  // EXPECTED ABUNDANCE FOR ALL GRIDS
+  // -------------------------------------------------
+  // array[n_grids_total, n_dates] real N_expected;
+  // 
+  // for (g in 1:n_grids_total) {
+  //   for (t in 1:n_dates) {
+  //     // direct copy of stored latent abundance
+  //     N_expected[g,t] = lambda_base[g,t];
+  //   }
+  // }
 
-  int  n_near_boundary = 0;
-  real max_N_ratio     = 0.0;
+  // -------------------------------------------------
+  // POSTERIOR PREDICTIVE REPLICATIONS (COUNTS SURVEY)
+  // -------------------------------------------------
+  array[n_obs_y] int y_rep;
+  
+  // Observed statistics
+  real mean_y_obs = mean(to_vector(y));
+  real sd_y_obs   = sd(to_vector(y));
+  int  max_y_obs  = max(y);
+  real prop_zeros_obs;
+  
+  {
+    int zeros = 0;
+    for (k in 1:n_obs_y)
+      if (y[k] == 0) zeros += 1;
+    prop_zeros_obs = zeros * 1.0 / n_obs_y;
+  }
+
+  // replicated statistics
+  real mean_y_rep;
+  real sd_y_rep;
+  int  max_y_rep;
+  real prop_zeros_rep;
+  
+  // track if N_max is sufficient
+  int n_near_boundary = 0;  // count of simulated N within 10% of N_max
+  real max_N_ratio = 0.0;   // maximum N/N_max ratio observed
 
   {
+    vector[n_obs_y] y_vec;
+    int zeros = 0;
+
     for (k in 1:n_obs_y) {
       int g = site_to_grid[k];
       int t = date_y[k];
 
-      int N_sim = neg_binomial_2_rng(lambda_base[g, t], phi);
-
+      int N_sim = neg_binomial_2_rng(lambda_base[g,t], phi);
+      
+      // monitor N_max adequacy
       real N_ratio = N_sim * 1.0 / N_max;
       if (N_ratio > max_N_ratio) max_N_ratio = N_ratio;
       if (N_ratio > 0.9) n_near_boundary += 1;
@@ -250,127 +286,68 @@ generated quantities {
       );
 
       y_rep[k] = binomial_rng(N_sim, p_detect);
+      y_vec[k] = y_rep[k];
+
+      if (y_rep[k] == 0) zeros += 1;
     }
+
+    mean_y_rep = mean(y_vec);
+    sd_y_rep   = sd(y_vec);
+    max_y_rep  = max(y_rep);
+    prop_zeros_rep = zeros * 1.0 / n_obs_y;
   }
 
-  // =========================================================================
-  // LOG-LIKELIHOOD FOR LOO-CV
-  // =========================================================================
-  vector[n_obs_y]  log_lik_survey;
-  vector[n_obs_po] log_lik_po;
 
-  for (k in 1:n_obs_y) {
-    int g = site_to_grid[k];
-    int t = date_y[k];
-    real p_trap = inv_logit(alpha0 +
-                            alpha_RH      * z_RH[k] +
-                            alpha_WS_rain * z_WS_rain[k] +
-                            alpha_trap[trap_type[k]]);
-    log_lik_survey[k] = binomial_negbin_marginal_lpmf(
-      y[k] | p_trap, lambda_base[g, t], phi, N_max
-    );
-  }
+  // -------------------------------------------------
+  // POSTERIOR PREDICTIVE REPLICATIONS (PO PRESENCE-ONLY)
+  // -------------------------------------------------
+  array[n_obs_po] int po_rep;
 
   for (r in 1:n_obs_po) {
     int g = po_grid_idx[r];
     int t = date_po[r];
-    log_lik_po[r] = log(lambda_thinned[g, t]) -
-                    log(background[t]) -
-                    log(CONSTANT);
+
+    // thinning / reporting bias model
+    real p_thin = inv_logit(
+      delta0
+      + delta_poi     * z_poi[g]
+      + delta_reports * z_reports[g]
+    );
+
+    // stored latent abundance
+    int N_sim = neg_binomial_2_rng(lambda_base[g,t], phi);
+
+    // thinned into an observed PO presence
+    int N_thinned = binomial_rng(N_sim, p_thin);
+
+    po_rep[r] = (N_thinned > 0);
   }
+  
+  
+  // -------------------------------------------------
+  // residuals for survey data
+  // -------------------------------------------------
+  array[n_obs_y] real residual_y;
+  array[n_obs_y] real expected_y;
+
+  for (k in 1:n_obs_y) {
+    int g = site_to_grid[k];
+    int t = date_y[k];
+
+    real p_detect = inv_logit(
+      alpha0
+      + alpha_RH      * z_RH[k]
+      + alpha_WS_rain * z_WS_rain[k]
+      + alpha_trap[trap_type[k]]
+    );
+
+    // expected observed count
+    expected_y[k] = p_detect * lambda_base[g, t];
+
+    // residual on observed scale
+    residual_y[k] = y[k] - expected_y[k];
+  }
+
+
 }
 
-
-
-// generated quantities {
-//   
-//   // -------------------------------------------------
-//   // POSTERIOR PREDICTIVE REPLICATIONS (COUNTS: SURVEY)
-//   // -------------------------------------------------
-//   array[n_obs_y] int y_rep;
-//   
-//   // Observed statistics
-//   real mean_y_obs = mean(to_vector(y));
-//   real sd_y_obs   = sd(to_vector(y));
-//   int  max_y_obs  = max(y);
-//   real prop_zeros_obs;
-//   
-//   {
-//     int zeros = 0;
-//     for (k in 1:n_obs_y)
-//       if (y[k] == 0) zeros += 1;
-//     prop_zeros_obs = zeros * 1.0 / n_obs_y;
-//   }
-// 
-//   // Replicated statistics
-//   real mean_y_rep;
-//   real sd_y_rep;
-//   int  max_y_rep;
-//   real prop_zeros_rep;
-//   
-//   // MONITORING: Track if N_max is sufficient
-//   int n_near_boundary = 0;  // Count of simulated N within 10% of N_max
-//   real max_N_ratio = 0.0;   // Maximum N/N_max ratio observed
-// 
-//   {
-//     vector[n_obs_y] y_vec;
-//     int zeros = 0;
-// 
-//     for (k in 1:n_obs_y) {
-//       int g = site_to_grid[k];
-//       int t = date_y[k];
-// 
-//       int N_sim = neg_binomial_2_rng(lambda_base[g,t], phi);
-//       
-//       // Monitor N_max adequacy
-//       real N_ratio = N_sim * 1.0 / N_max;
-//       if (N_ratio > max_N_ratio) max_N_ratio = N_ratio;
-//       if (N_ratio > 0.9) n_near_boundary += 1;
-// 
-//       real p_detect = inv_logit(
-//         alpha0
-//         + alpha_RH      * z_RH[k]
-//         + alpha_WS_rain * z_WS_rain[k]
-//         + alpha_trap[trap_type[k]]
-//       );
-// 
-//       y_rep[k] = binomial_rng(N_sim, p_detect);
-//       y_vec[k] = y_rep[k];
-// 
-//       if (y_rep[k] == 0) zeros += 1;
-//     }
-// 
-//     mean_y_rep = mean(y_vec);
-//     sd_y_rep   = sd(y_vec);
-//     max_y_rep  = max(y_rep);
-//     prop_zeros_rep = zeros * 1.0 / n_obs_y;
-//   }
-// 
-// 
-//   // -------------------------------------------------
-//   // POSTERIOR PREDICTIVE REPLICATIONS (PO PRESENCE-ONLY)
-//   // -------------------------------------------------
-//   array[n_obs_po] int po_rep;
-// 
-//   for (r in 1:n_obs_po) {
-//     int g = po_grid_idx[r];
-//     int t = date_po[r];
-// 
-//     // thinning / reporting bias model
-//     real p_thin = inv_logit(
-//       delta0
-//       + delta_poi     * z_poi[g]
-//       + delta_reports * z_reports[g]
-//     );
-// 
-//     // stored latent abundance
-//     int N_sim = neg_binomial_2_rng(lambda_base[g,t], phi);
-// 
-//     // thinned into an observed PO presence
-//     int N_thinned = binomial_rng(N_sim, p_thin);
-// 
-//     po_rep[r] = (N_thinned > 0);
-//   }
-// 
-// }
-// 

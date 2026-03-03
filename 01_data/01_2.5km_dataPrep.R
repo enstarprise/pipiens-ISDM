@@ -281,7 +281,6 @@ if (!check_required_files(unlist(input_files))) {
   stop("Missing required input files. Please check file paths.")
 }
 
-
 # ============================================================================
 # LOAD GRID AND OBSERVED DATA 
 # ============================================================================
@@ -557,7 +556,6 @@ date_lookup <- setNames(seq_along(all_dates_sorted), as.character(all_dates_sort
 
 # dist_matrix <- load("01_data/covariates/dist_matrix_2point5km_meters.Rdata")
 
-
 cat("Data types fixed:\n")
 cat("  grid grid_id:", class(grid$grid_id), "\n")
 cat("  dates_to_keep:", class(dates_to_keep), "\n")
@@ -628,7 +626,6 @@ cs_presences$ones <- 1
 
 grid_2point5km <- st_read("01_data/grids/grid_clipped_2point5km.gpkg")
 
-
 grid_2point5km_ordered <- grid_2point5km %>%
   mutate(grid_id = as.character(grid_id)) %>%
   slice(match(grid_levels, grid_id))
@@ -644,7 +641,6 @@ coords_2point5km <- st_coordinates(centroids_2point5km)
 # Observed grids must map correctly
 stopifnot(all(!is.na(obs_grid_idx)))
 stopifnot(all(!is.na(po_grid_idx)))
-
 
 
 # ==============================================================================
@@ -695,7 +691,6 @@ hist(z_rain, breaks = 40, main = "z_rain", xlab = "")
 hist(z_rain2, breaks = 40, main = "z_rain^2", xlab = "")
 # =============================================================
 
-
 # LAnd matrices
 z_land_data <- z_land_data %>%
   arrange(grid_id) %>%
@@ -709,7 +704,7 @@ z_land_data_clean[is.na(z_land_data_clean )] <- 0
 n_land_covs <- ncol(z_land_data[, setdiff(grep("^z_", colnames(z_land_data), value = TRUE), 
                                           c("z_saltwater_km2", "z_urban_km2", "z_suburban_km2", 
                                             "z_poi_count", "z_buildings_count", "z_poi_log",
-                                             "z_reports"))])
+                                             "z_reports", "z_livestock_density", "z_freshwater_km2_log"))])
 
 
 # ==============================================================================
@@ -803,9 +798,6 @@ save(
 
 # ==========================================================================
 
-
-
-cat("✓ All data loaded and saved to 'loaded_data.RData'\n")
 
 # HOW TO LOAD THE RDATA FILE
 # loaded_data <- load("01_data/loaded_data.RData")
