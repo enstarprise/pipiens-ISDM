@@ -32,11 +32,11 @@ library(ggplot2)
 # prior samples
 set.seed(123)
 n_samples <- 10000
-beta_samples <- rnorm(n_samples, 0, 1)
+beta_samples <- rnorm(n_samples, 0, 10)
 odds_ratio_samples <- exp(beta_samples)
 
 plot_data <- data.frame(
-  beta = beta_samples,
+  beta = beta_samples, s
   odds_ratio = odds_ratio_samples
 )
 

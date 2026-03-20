@@ -18,7 +18,7 @@ library(ggplot2)
 
 #####  read csvs and distance matrix 
 load("01_data/covariates/dist_matrix_2point5km_meters.Rdata")
-temp_2point5km <- read_csv("01_data/covariates/min_temp_21day_2point5km_new.csv")
+temp_2point5km <- read_csv("01_data/covariates/mean_temp_21day_2point5km_new.csv")
 rainfall_2point5km <- read_csv("01_data/covariates/rainfall_28day_2point5km_new.csv")
 livestock_df <- read_csv( "01_data/covariates/livestockDensity_2point5km_new.csv")
 elevation_df <- read_csv( "01_data/covariates/elevation_2point5km_new.csv")
@@ -74,7 +74,7 @@ write_csv(grid_2point5km_wkt, "01_data/csvs/grid_clipped_2point5km_wkt.csv")
 # --- 1. CLIMATE DATA: TEMPERATURE --------------------------------------------
 message("Processing minimum temperature data...")
 
-temp_1km <- read_csv("01_data/csvs/tasmin_grid_21day.csv")
+temp_1km <- read_csv("01_data/csvs/tasmean_grid_21d_celsius.csv")
 
 # 1. Map 1km grids to 2.5km grids
 mapping_1km_to_2point5km <- st_join(
@@ -98,20 +98,23 @@ temp_2point5km <- temp_1km %>%
   
   # Compute mean of 7-day min temperature
   summarise(
-    min_temp_21d_celsius = mean(mean_min_temp_7d_celsius, na.rm = TRUE),
+    mean_temp_21d_celsius = mean(mean_temp_21d_celsius, na.rm = TRUE),
     .groups = "drop"
   ) %>%
   
   #standardize the temperature
   mutate(
-    min_temp_21d_celsius = as.numeric(min_temp_21d_celsius),
-    z_temp_min = scale(min_temp_21d_celsius)[,1]
+    mean_temp_21d_celsius = as.numeric(mean_temp_21d_celsius),
+    z_temp_min = scale(mean_temp_21d_celsius)[,1]
   )
 
 names(temp_2point5km)[1] <- "grid_id"
 
+temp_mean <- mean(temp_2point5km$mean_temp_21d_celsius, na.rm = TRUE) # 11.9104
+temp_sd   <- sd(temp_2point5km$mean_temp_21d_celsius, na.rm = TRUE) # 2.7429
 
-write_csv(temp_2point5km, "01_data/covariates/min_temp_21day_2point5km_new.csv")
+
+write_csv(temp_2point5km, "01_data/covariates/mean_temp_21day_2point5km_new.csv")
 
 
 # --- 2. CLIMATE DATA: RAINFALL -----------------------------------------------
@@ -119,9 +122,10 @@ message("Processing rainfall data...")
 
 rainfall_1km <- read_csv("01_data/csvs/rainfall_grid_new.csv")
 
+
 # Map and aggregate
-rainfall_2km <- rainfall_1km %>%
-  left_join(mapping_1km_to_2km, by = "grid_id") %>%
+rainfall_2point5kmkm <- rainfall_1km %>%
+  left_join(mapping_1km_to_2point5km, by = c("grid_id" = "grid_id_1km")) %>%
   group_by(grid_id_area2km, date) %>%
   summarise(rainfall_28d = mean(rainfall_28d, na.rm = TRUE), .groups = "drop") %>%
   mutate(
@@ -146,6 +150,11 @@ rainfall_2point5km <- rainfall_1km %>%
   )
 
 names(rainfall_2point5km)[1] <- "grid_id"
+
+
+rain_mean <- mean(rainfall_2point5km$rainfall_28d, na.rm = TRUE) # 98.814mm
+rain_sd   <- sd(rainfall_2point5km$rainfall_28d, na.rm = TRUE)  # 63.6967mm
+
 
 write_csv(rainfall_2point5km, "01_data/covariates/rainfall_28day_2point5km_new.csv")
 

@@ -24,13 +24,14 @@ suppressPackageStartupMessages({
 })
 
 # stan_data_GIRDRES_MODELTYPE_GRIDSCOPE_QUADRATIC.RData
-load("01_data/processedCovariates/2.5km/stan_data_2.5km_NNGP_all_both.RData")
+# load("01_data/processedCovariates/2.5km/stan_data_2.5km_NNGP_all_both.RData")
+load("01_data/processedCovariates/2.5km/SURVEY_stan_data_2.5km_NNGP_observed_both.RData")
 
 # ============================================================================
 #  MODEL RUN 
 # ============================================================================
 
-stan_data$N_max <- 15
+stan_data$N_max <- 10
 
 
 test_init <- init_fun()
@@ -39,7 +40,7 @@ print(test_init$beta_land)
 print("Should be around ±0.03")
 
 
-model <- cmdstan_model("02_model/stan/model_nngp.stan",
+model <- cmdstan_model("02_model/stan/model_survey_nngp.stan",
                        cpp_options = list(stan_threads = TRUE))
 
 
@@ -60,7 +61,7 @@ fit <- model$sample(
 )
 
 
-saveRDS(fit,"02_model/stan/modelRuns/model_nonspatial_poisson.rds")
+saveRDS(fit,"02_model/stan/modelRuns/model_survey_nngp.rds")
 
 
 fit_nb <- readRDS("02_model/stan/modelRuns/model_nonspatial2.rds")
@@ -93,8 +94,8 @@ if (any(diag$num_max_treedepth > 0)) {
 # parameters of interest
 main_params <- c(
   "beta0", "beta_temp", "beta_rain", "beta_land",
-  "alpha0", "alpha_RH", "alpha_WS_rain", "sigma_trap", "alpha_trap",
-  "delta0", "delta_poi", "delta_reports"
+  "alpha0", "alpha_RH", "alpha_WS_rain", "sigma_trap", "alpha_trap"
+  # "delta0", "delta_poi", "delta_reports"
 )
 
 results <- fit$summary(main_params)
@@ -103,22 +104,26 @@ print(results)
 # # Save summary
 # write_csv(results, "03_posterior/results/parameter_estimates.csv")
 
+load("03_posterior/savedObjects/posterior_mat_nngp copy.rds")
+
 
 # ============================================================================
 # POSTEIROR VISUALISATION
 # ============================================================================
 library(bayesplot)
 main_params <- c(
-  "beta0", "beta_temp", "beta_rain", "beta_land[1]", "beta_land[2]", "beta_land[3]",
+  "beta0", "beta_temp", "beta_temp2", "beta_rain", "beta_rain2",
+  "beta_land[1]", "beta_land[2]", "beta_land[3]",
   "beta_land[4]", "beta_land[5]", "beta_land[6]", "beta_land[7]", "beta_land[8]",
   "alpha0", "alpha_RH", "alpha_WS_rain", "sigma_trap", "alpha_trap[1]", "alpha_trap[1]",
   "alpha_trap[2]", "alpha_trap[3]", "alpha_trap[4]", "alpha_trap[5]",
-  "delta0", "delta_poi", "delta_reports",
+  # "delta0", "delta_poi", "delta_reports",
   "phi"
 )
 
 lambda_params<- c(
-  "beta0", "beta_temp", "beta_rain", "beta_land[1]", "beta_land[2]", "beta_land[3]",
+  "beta_temp", "beta_temp2", "beta_rain", "beta_rain2",
+  "beta_land[1]", "beta_land[2]", "beta_land[3]",
   "beta_land[4]", "beta_land[5]", "beta_land[6]", "beta_land[7]", "beta_land[8]"
 )
 

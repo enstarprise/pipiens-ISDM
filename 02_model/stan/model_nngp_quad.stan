@@ -266,6 +266,7 @@ model {
   beta_rain  ~ normal(0, 1);
   beta_temp2 ~ normal(0, 1);  // inactive when z_temp_sq = 0: samples prior only
   beta_rain2 ~ normal(0, 1);  // inactive when z_rain_sq = 0: samples prior only
+  beta_land ~ normal(0, 1);
 
   alpha0        ~ normal(logit(0.10), 0.5);
   alpha_RH      ~ normal(0, 1);

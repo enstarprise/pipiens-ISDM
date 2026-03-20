@@ -210,8 +210,10 @@ data {
   array[n_obs_po] int<lower=1> ones;
   
   // Covariates
-  matrix[n_grids_total, n_dates] z_temp;
-  matrix[n_grids_total, n_dates] z_rain;
+  matrix[n_grids_total, n_dates]     z_temp;
+  matrix[n_grids_total, n_dates]     z_temp_sq;
+  matrix[n_grids_total, n_dates]     z_rain;
+  matrix[n_grids_total, n_dates]     z_rain_sq;
   matrix[n_grids_total, n_land_covs] z_land;
   vector[n_grids_total] z_poi;
   vector[n_grids_total] z_reports;
@@ -267,6 +269,8 @@ parameters {
   real beta0;
   real beta_temp;
   real beta_rain;
+  real beta_temp2;  
+  real beta_rain2;  
   vector[n_land_covs] beta_land;
   
   // Detection model
@@ -339,33 +343,13 @@ transformed parameters {
                             delta_reports * z_reports[g]);
 
     for (t in 1:n_dates) {
-      
-      // real land_contribution = dot_product(beta_land, z_land[g, ]);
-      // 
-      // // Debug extreme values
-      // if (abs(land_contribution) > 15) {
-      //   print("WARNING: Large land contribution");
-      //   print("  Grid: ", g, " Time: ", t);
-      //   print("  Land contrib: ", land_contribution);
-      //   print("  beta_land: ", beta_land);
-      //   print("  z_land[g]: ", z_land[g,]);
-      // }
-      
       real log_lambda_base = beta0 +
-                            beta_temp * z_temp[g, t] +
-                            beta_rain * z_rain[g, t] +
+                             beta_temp  * z_temp[g, t] +
+                             beta_temp2 * z_temp_sq[g, t] +
+                             beta_rain  * z_rain[g, t] +
+                             beta_rain2 * z_rain_sq[g, t] +
                             dot_product(beta_land, z_land[g, ]) +
                             spatial_effect[g];  // Same spatial effect for all times
-                            
-  //   if (log_lambda_base < -50 || log_lambda_base > 50) {
-  //   print("Extreme log_lambda_base: ", log_lambda_base);
-  //   print("beta0: ", beta0);
-  //   print("spatial_effect[g]: ", spatial_effect[g]);
-  //   print("sum(beta_land * z_land[g]): ", dot_product(beta_land, z_land[g, ]));
-  // }
-      
-      // Constrain to reasonable range
-      //log_lambda_base = fmin(fmax(log_lambda_base, -20), 20);
 
       lambda_base[g, t] = exp(log_lambda_base);
       lambda_thinned[g, t] = lambda_base[g, t] * 
@@ -377,11 +361,6 @@ transformed parameters {
   for (t in 1:n_dates) {
     background[t] = (sum(lambda_thinned[, t])) / n_obs_po;
   }
-  
-  // Debug: check lambda values
-  // print("lambda_base min: ", min(lambda_base));
-  // print("lambda_base max: ", max(lambda_base));
-  // print("lambda_base mean: ", mean(lambda_base));
 }
 
 model {
@@ -395,6 +374,8 @@ model {
   beta0 ~ normal(0, 2);
   beta_temp ~ normal(0, 1);
   beta_rain ~ normal(0, 1);
+  beta_temp2 ~ normal(0, 1);  // inactive when z_temp_sq = 0: samples prior only
+  beta_rain2 ~ normal(0, 1);  // inactive when z_rain_sq = 0: samples prior only
   beta_land ~ normal(0, 0.2);  
   
   alpha0 ~ normal(logit(0.10), 0.5);

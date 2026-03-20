@@ -94,8 +94,8 @@ cat(sprintf("Full data: %d grids x %d dates\n", nrow(z_temp_clean), ncol(z_temp_
 if (GRID_SCOPE == "observed") {
   
   cat("\nSubsetting to observed grids only...\n")
-  
-  observed_grid_ids <- sort(unique(c(survey_df$grid_id, cs_df$grid_id)))
+  observed_grid_ids <- sort(unique(c(survey_df$grid_id)))
+  # observed_grid_ids <- sort(unique(c(survey_df$grid_id, cs_df$grid_id)))
   n_grids_total     <- length(observed_grid_ids)
   grid_positions    <- match(observed_grid_ids, all_grid_ids)
   
@@ -221,7 +221,7 @@ n_dates      <- ncol(z_temp_scope)
 n_grids_obs  <- n_grids_total   # for "observed": obs == total; for "all": same
 # (Stan model uses n_grids_total throughout)
 CONSTANT     <- 10000
-N_MULTIPLIER <- 40
+N_MULTIPLIER <- 30
 GRAINSIZE    <- 10
 
 # ============================================================================
@@ -443,11 +443,7 @@ init_fun <- function() {
     
     # GP hyperparameters (same names for HSGP and NNGP)
     alpha_gp = 0.5,
-    rho_gp   = 5,
-    
-    # Random date effect on detection
-    eta_date   = rep(0, n_dates),   # start at zero deviations
-    sigma_date = 0.1                # start with small date variance
+    rho_gp   = 5
   )
   
   spatial_inits <- switch(MODEL_TYPE,
@@ -455,7 +451,7 @@ init_fun <- function() {
                             beta_gp_raw = rnorm(stan_data$M_sqrt^2, 0, 0.1)
                           ),
                           "NNGP" = list(
-                            w_gp = rep(0, n_grids_total)
+                            w_raw = rep(0, n_grids_total) 
                           ),
                           "NNGP_centered" = list(
                             # Initialise w_b1 at beta0 so the zero-mean residual starts near zero,
@@ -491,7 +487,7 @@ cat(sprintf("  Grid scope  : %s (%d grids)\n", GRID_SCOPE, n_grids_total))
 cat(sprintf("  Quadratic   : %s\n", QUADRATIC))
 cat(sprintf("  Dates       : %d\n", n_dates))
 cat(sprintf("  Survey obs  : %d\n", nrow(survey_df_stan)))
-cat(sprintf("  PO records  : %d\n", nrow(cs_presences_stan)))
+# cat(sprintf("  PO records  : %d\n", nrow(cs_presences_stan)))
 cat(sprintf("  Land covs   : %d\n", n_land_covs))
 if (MODEL_TYPE == "HSGP") {
   cat(sprintf("  Basis fns    : %d (M_sqrt = %d)\n", stan_data$M_sqrt^2, stan_data$M_sqrt))

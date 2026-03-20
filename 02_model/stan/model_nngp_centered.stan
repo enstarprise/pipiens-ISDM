@@ -160,6 +160,8 @@ data {
   vector[n_grids_total]              z_reports;
   vector[n_obs_y]                    z_RH;
   vector[n_obs_y]                    z_WS_rain;
+  matrix[n_grids_total, n_dates] z_temp_sq;
+  matrix[n_grids_total, n_dates] z_rain_sq;
 
   vector[n_grids_total] area_grid;
   real  CONSTANT;
@@ -189,6 +191,8 @@ parameters {
   real beta0;           // intercept: sampled for its prior, absorbed into w_b1
   real beta_temp;
   real beta_rain;
+  real beta_temp2;
+  real beta_rain2;
   vector[n_land_covs] beta_land;
 
   // --- Detection model (unchanged) ---
@@ -238,9 +242,11 @@ transformed parameters {
       // w_b1[g] replaces (beta0 + w_gp[g]) from model_nngp.stan.
       // The intercept is now baked into the spatial field itself.
       real log_lambda_base = w_b1[g] +
-                             beta_temp * z_temp[g, t] +
-                             beta_rain * z_rain[g, t] +
-                             dot_product(beta_land, z_land[g, ]);
+                       beta_temp  * z_temp[g, t] +
+                       beta_temp2 * z_temp_sq[g, t] + 
+                       beta_rain  * z_rain[g, t] +
+                       beta_rain2 * z_rain_sq[g, t] +   
+                       dot_product(beta_land, z_land[g, ]);
 
       lambda_base[g, t]    = exp(log_lambda_base);
       lambda_thinned[g, t] = lambda_base[g, t] * area_grid[g] * p_thin;
@@ -260,6 +266,8 @@ model {
   beta0     ~ normal(0, 2);
   beta_temp ~ normal(0, 1);
   beta_rain ~ normal(0, 1);
+  beta_temp2 ~ normal(0, 1);
+  beta_rain2 ~ normal(0, 1);
   beta_land ~ normal(0, 0.2);
 
   // --- Detection priors (unchanged) ---
@@ -278,8 +286,8 @@ model {
   phi ~ lognormal(0, 1);
 
   // --- NNGP hyperparameter priors (unchanged) ---
-  alpha_gp ~ inv_gamma(2, 5);
-  rho_gp   ~ gamma(4, 1);
+  alpha_gp ~ normal(0, 1); 
+  rho_gp   ~ gamma(8, 0.5);
 
   // --- Intercept-centred NNGP prior on w_b1 ---
   // The key change: beta0 is passed as the `intercept` argument.
